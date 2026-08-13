@@ -111,7 +111,7 @@ client.once("ready", async () => {
     const savedChannelId = await settings.load();
     const initialChannelId = savedChannelId || process.env.DISCORD_CHANNEL_ID;
     if (initialChannelId) await selectDiscordChannel(initialChannelId);
-    client.user.setActivity("MPCS chat", { type: ActivityType.Watching });
+    client.user.setActivity("over MPCS", { type: ActivityType.Watching });
     console.log(`Connected as ${client.user.tag}.`);
     if (discordChannel) console.log(`Forwarding chat to #${discordChannel.name}.`);
     else console.log("No chat channel selected yet. Use /setchat in Discord.");
