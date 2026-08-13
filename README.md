@@ -4,15 +4,23 @@ The MPCS Minecraft plugin sends accepted player chat over authenticated HTTPS to
 
 ## Railway variables
 
-Set these three variables on the Railway service:
+Set these variables on the Railway service:
 
 ```dotenv
 DISCORD_TOKEN=your_discord_bot_token
-DISCORD_CHANNEL_ID=your_text_channel_id
 BRIDGE_SECRET=a_long_random_secret
+CONFIG_PATH=/data/config.json
 ```
 
 Railway supplies `PORT` automatically. The start command is `npm start`. Generate a public Railway domain, then use its HTTPS URL in the plugin's `discord.yml`.
+
+Add a Railway volume mounted at `/data`, then use this Discord command from an account with **Manage Server** permission:
+
+```text
+/setchat channel-id:YOUR_CHANNEL_ID
+```
+
+The selected channel is stored in `/data/config.json`, so it survives deployments and restarts. `DISCORD_CHANNEL_ID` remains available as an optional initial fallback.
 
 ## Minecraft configuration
 

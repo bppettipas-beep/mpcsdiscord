@@ -1,9 +1,10 @@
 import "dotenv/config";
 import { createServer } from "node:http";
-import { Client, GatewayIntentBits, ActivityType, escapeMarkdown } from "discord.js";
+import { Client, GatewayIntentBits, ActivityType, escapeMarkdown, PermissionFlagsBits, SlashCommandBuilder } from "discord.js";
 import { secretsMatch, validateChatPayload } from "./bridge-utils.js";
+import { SettingsStore } from "./settings-store.js";
 
-const required = ["DISCORD_TOKEN", "DISCORD_CHANNEL_ID", "BRIDGE_SECRET"];
+const required = ["DISCORD_TOKEN", "BRIDGE_SECRET"];
 const missing = required.filter((name) => !process.env[name]);
 if (missing.length) {
   console.error(`Missing required environment variables: ${missing.join(", ")}`);
@@ -11,9 +12,32 @@ if (missing.length) {
 }
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const settings = new SettingsStore(process.env.CONFIG_PATH || "/data/config.json");
 const outgoing = [];
 let discordChannel;
 let flushing = false;
+
+const setChatCommand = new SlashCommandBuilder()
+  .setName("setchat")
+  .setDescription("Set the channel that receives Minecraft chat")
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+  .addStringOption((option) => option
+    .setName("channel-id")
+    .setDescription("The Discord channel ID")
+    .setRequired(true));
+
+async function selectDiscordChannel(channelId) {
+  const channel = await client.channels.fetch(channelId);
+  if (!channel?.isTextBased() || !channel.isSendable() || !channel.guild) {
+    throw new Error("That ID is not a server text channel the bot can send to.");
+  }
+  const permissions = channel.permissionsFor(client.user);
+  if (!permissions?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages])) {
+    throw new Error("The bot needs View Channel and Send Messages permission there.");
+  }
+  discordChannel = channel;
+  return channel;
+}
 
 function queueDiscordLine({ player, message }) {
   outgoing.push(`**${escapeMarkdown(player)}**: ${escapeMarkdown(message)}`);
@@ -83,14 +107,36 @@ setInterval(() => void flushOutgoing(), 500);
 
 client.once("ready", async () => {
   try {
-    const channel = await client.channels.fetch(process.env.DISCORD_CHANNEL_ID);
-    if (!channel?.isTextBased() || !channel.isSendable()) throw new Error("The configured Discord channel is not sendable.");
-    discordChannel = channel;
+    await client.application.commands.set([setChatCommand.toJSON()]);
+    const savedChannelId = await settings.load();
+    const initialChannelId = savedChannelId || process.env.DISCORD_CHANNEL_ID;
+    if (initialChannelId) await selectDiscordChannel(initialChannelId);
     client.user.setActivity("MPCS chat", { type: ActivityType.Watching });
-    console.log(`Connected as ${client.user.tag}; forwarding chat to #${channel.name ?? channel.id}.`);
+    console.log(`Connected as ${client.user.tag}.`);
+    if (discordChannel) console.log(`Forwarding chat to #${discordChannel.name}.`);
+    else console.log("No chat channel selected yet. Use /setchat in Discord.");
   } catch (error) {
-    console.error("Discord channel setup failed:", error);
-    process.exit(1);
+    console.error("Discord startup configuration warning:", error.message);
+  }
+});
+
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isChatInputCommand() || interaction.commandName !== "setchat") return;
+  if (!interaction.inGuild() || !interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+    await interaction.reply({ content: "You need Manage Server permission to use this command.", ephemeral: true });
+    return;
+  }
+  await interaction.deferReply({ ephemeral: true });
+  try {
+    const raw = interaction.options.getString("channel-id", true).trim();
+    const channelId = raw.replace(/^<#(\d+)>$/, "$1");
+    if (!/^\d{17,20}$/.test(channelId)) throw new Error("Enter a valid Discord channel ID.");
+    const channel = await selectDiscordChannel(channelId);
+    if (channel.guildId !== interaction.guildId) throw new Error("The channel must be in this Discord server.");
+    await settings.saveChannel(channel.id);
+    await interaction.editReply(`Minecraft chat will now be sent to <#${channel.id}>.`);
+  } catch (error) {
+    await interaction.editReply(`Could not set the chat channel: ${error.message}`);
   }
 });
 
