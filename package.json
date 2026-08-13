@@ -1,0 +1,19 @@
+{
+  "name": "mpcs-discord-chat",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Receives authenticated MPCS Minecraft chat and forwards it to Discord.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "discord.js": "14.27.0",
+    "dotenv": "16.6.1"
+  }
+}
