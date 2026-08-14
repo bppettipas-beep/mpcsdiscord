@@ -148,8 +148,9 @@ const port = Number(process.env.PORT) || 3000;
 server.listen(port, "0.0.0.0", () => console.log(`HTTP bridge listening on port ${port}.`));
 setInterval(() => void flushOutgoing(), 500);
 
-client.once("ready", async () => {
+client.once("clientReady", async () => {
   try {
+    console.log("MPCS bot build: railway-radio-native-ffmpeg-v2");
     await client.application.commands.set([setChatCommand.toJSON(), setRadioCommand.toJSON()]);
     const savedChannelId = await settings.load();
     const initialChannelId = savedChannelId || process.env.DISCORD_CHANNEL_ID;
