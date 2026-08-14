@@ -10,6 +10,7 @@ export class SettingsStore {
     this.radioChannelId = null;
     this.teamSnapshot = { teams: [], players: [] };
     this.teamActions = [];
+    this.teamDrafts = {};
   }
 
   async load() {
@@ -21,6 +22,7 @@ export class SettingsStore {
       this.radioChannelId = typeof value.radioChannelId === "string" ? value.radioChannelId : null;
       this.teamSnapshot = value.teamSnapshot || { teams: [], players: [] };
       this.teamActions = Array.isArray(value.teamActions) ? value.teamActions : [];
+      this.teamDrafts = value.teamDrafts && typeof value.teamDrafts === "object" ? value.teamDrafts : {};
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
@@ -35,7 +37,7 @@ export class SettingsStore {
   async save() {
     await mkdir(dirname(this.filePath), { recursive: true });
     const temporary = `${this.filePath}.tmp`;
-    await writeFile(temporary, JSON.stringify({ channelId: this.channelId, radioChannelId: this.radioChannelId, pending: this.pending, links: this.links, teamSnapshot: this.teamSnapshot, teamActions: this.teamActions }, null, 2), "utf8");
+    await writeFile(temporary, JSON.stringify({ channelId: this.channelId, radioChannelId: this.radioChannelId, pending: this.pending, links: this.links, teamSnapshot: this.teamSnapshot, teamActions: this.teamActions, teamDrafts: this.teamDrafts }, null, 2), "utf8");
     await rename(temporary, this.filePath);
   }
 }
