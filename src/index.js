@@ -24,7 +24,7 @@ const radio = new RadioService(client, process.env.RADIO_STREAM_URL || "https://
 const automod = new AutoModService(client, settings);
 const mainGuildId = process.env.MAIN_GUILD_ID || null;
 const staffGuildId = process.env.STAFF_GUILD_ID || null;
-const auditLogs = new AuditLogService(client,settings,staffGuildId);
+const auditLogs = new AuditLogService(client,settings,mainGuildId,staffGuildId);
 const teamMemberRoleId = process.env.TEAM_MEMBER_ROLE_ID || "1537632587260887150";
 const outgoing = [];
 let discordChannel;
