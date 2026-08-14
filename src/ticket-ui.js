@@ -16,8 +16,9 @@ const ticketTypes = config => config?.ticketTypes?.length ? config.ticketTypes :
 const ensureTypes = config => config.ticketTypes ||= ticketTypes(config).map(type => ({ ...type }));
 const panel = config => {
   const look = appearance(config);
-  const buttons = ticketTypes(config).map(type => new ButtonBuilder().setCustomId(`ticket:open:${type.id}`).setLabel(type.label).setEmoji("🎫").setStyle(styles[type.style] || ButtonStyle.Primary));
-  const components = []; for (let index = 0; index < buttons.length; index += 5) components.push(row(...buttons.slice(index, index + 5)));
+  const types = ticketTypes(config), components = [];
+  if (config?.layout === "dropdown") components.push(row(new StringSelectMenuBuilder().setCustomId("ticket:open-select").setPlaceholder("Select a ticket type").addOptions(types.map(type => ({ label: type.label, value: type.id, description: `Open a ${type.name} ticket`.slice(0, 100), emoji: "🎫" })))));
+  else { const buttons = types.map(type => new ButtonBuilder().setCustomId(`ticket:open:${type.id}`).setLabel(type.label).setEmoji("🎫").setStyle(styles[type.style] || ButtonStyle.Primary)); for (let index = 0; index < buttons.length; index += 5) components.push(row(...buttons.slice(index, index + 5))); }
   return { embeds: [new EmbedBuilder().setColor(0x00e5ff).setTitle(look.title).setDescription(look.description).setFooter({ text: look.footer })], components };
 };
 const ticketActions = record => row(new ButtonBuilder().setCustomId("ticket:close").setLabel("Close Ticket").setEmoji("🔒").setStyle(ButtonStyle.Danger), new ButtonBuilder().setCustomId("ticket:claim").setLabel(record?.claimedBy ? "Claimed" : "Claim Ticket").setEmoji("✋").setStyle(ButtonStyle.Success).setDisabled(Boolean(record?.claimedBy)));
@@ -31,8 +32,8 @@ function typeManager(config, selectedId, notice = "Add a ticket type or select o
   const components = [row(new StringSelectMenuBuilder().setCustomId("ticket:type-select").setPlaceholder("Select a ticket button to edit").addOptions(types.map(type => ({ label: type.label, value: type.id, description: `${type.name} • ${type.style}` }))))];
   if (selected) components.push(row(new RoleSelectMenuBuilder().setCustomId(`ticket:type-role:${selected.id}`).setPlaceholder(selected.pingRoleId ? "Change this ticket's ping and claim role" : "Select the role this ticket should ping").setMinValues(1).setMaxValues(1)));
   components.push(row(new ButtonBuilder().setCustomId("ticket:add-type").setLabel("Add Button").setEmoji("➕").setStyle(ButtonStyle.Success), ...(selected ? [new ButtonBuilder().setCustomId(`ticket:edit-type:${selected.id}`).setLabel("Edit Name").setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId(`ticket:edit-questions:${selected.id}`).setLabel("Edit Questions").setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId(`ticket:type-style:${selected.id}`).setLabel(`Style: ${selected.style}`).setStyle(ButtonStyle.Secondary)] : [])));
-  components.push(row(...(selected ? [new ButtonBuilder().setCustomId(`ticket:delete-type:${selected.id}`).setLabel("Delete Selected").setStyle(ButtonStyle.Danger)] : []), new ButtonBuilder().setCustomId("ticket:back-control").setLabel("Back").setStyle(ButtonStyle.Secondary)));
-  return { content: "", embeds: [new EmbedBuilder().setColor(0x00e5ff).setTitle("TICKET BUTTON MANAGER").setDescription(`${notice}\n\n${types.map((type, index) => `**${index + 1}. ${type.label}**\nCreates \`${safeName(type.name)}-1\`, \`${safeName(type.name)}-2\`, etc. • ${type.style}\nPings: ${type.pingRoleId ? `<@&${type.pingRoleId}>` : "default support role"} • ${(type.questions || []).length} question(s)`).join("\n\n")}`).setFooter({ text: `${types.length}/10 ticket buttons configured` })], components };
+  components.push(row(new ButtonBuilder().setCustomId("ticket:layout").setLabel(config.layout === "dropdown" ? "Layout: Dropdown" : "Layout: Buttons").setStyle(ButtonStyle.Primary), ...(selected ? [new ButtonBuilder().setCustomId(`ticket:delete-type:${selected.id}`).setLabel("Delete Selected").setStyle(ButtonStyle.Danger)] : []), new ButtonBuilder().setCustomId("ticket:back-control").setLabel("Back").setStyle(ButtonStyle.Secondary)));
+  return { content: "", embeds: [new EmbedBuilder().setColor(0x00e5ff).setTitle("TICKET BUTTON MANAGER").setDescription(`${notice}\n\n**Public layout: ${config.layout === "dropdown" ? "Dropdown selection" : "Individual buttons"}**\n\n${types.map((type, index) => `**${index + 1}. ${type.label}**\nCreates \`${safeName(type.name)}-1\`, \`${safeName(type.name)}-2\`, etc. • ${type.style}\nPings: ${type.pingRoleId ? `<@&${type.pingRoleId}>` : "default support role"} • ${(type.questions || []).length} question(s)`).join("\n\n")}`).setFooter({ text: `${types.length}/10 ticket options configured` })], components };
 }
 
 function controlPanel(settings, guildId, notice = "Use the selectors below—everything saves automatically.") {
@@ -92,8 +93,9 @@ export async function handleTicketCommand(interaction, settings) {
 }
 
 export async function handleTicketComponent(interaction, settings) {
-  const [, action, targetId] = interaction.customId.split(":");
-  if (["config-panel", "config-category", "config-role", "edit-appearance", "save-appearance", "manage-buttons", "type-select", "type-role", "add-type", "edit-type", "save-type", "edit-questions", "save-questions", "type-style", "delete-type", "back-control", "post-panel", "update-panel", "toggle", "refresh"].includes(action)) {
+  let [, action, targetId] = interaction.customId.split(":");
+  if (action === "open-select") { action = "open"; targetId = interaction.values[0]; }
+  if (["config-panel", "config-category", "config-role", "edit-appearance", "save-appearance", "manage-buttons", "layout", "type-select", "type-role", "add-type", "edit-type", "save-type", "edit-questions", "save-questions", "type-style", "delete-type", "back-control", "post-panel", "update-panel", "toggle", "refresh"].includes(action)) {
     if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return interaction.reply({ content: "You need Manage Server permission to use this control panel.", flags: MessageFlags.Ephemeral });
     const config = settings.ticketConfig[interaction.guildId] ||= { enabled: true };
     if (action === "edit-appearance") {
@@ -105,6 +107,7 @@ export async function handleTicketComponent(interaction, settings) {
       await settings.save(); return interaction.update(controlPanel(settings, interaction.guildId, "✅ Ticket panel text saved."));
     }
     if (action === "manage-buttons") return interaction.update(typeManager(config));
+    if (action === "layout") { config.layout = config.layout === "dropdown" ? "buttons" : "dropdown"; await settings.save(); return interaction.update(typeManager(config, null, `✅ Public ticket layout changed to ${config.layout === "dropdown" ? "a dropdown" : "individual buttons"}.`)); }
     if (action === "back-control") return interaction.update(controlPanel(settings, interaction.guildId));
     if (action === "type-select") return interaction.update(typeManager(config, interaction.values[0], "Selected. Use the controls below to edit this button."));
     if (action === "type-role") { const type = ensureTypes(config).find(entry => entry.id === targetId); if (!type) return interaction.reply({ content: "That ticket button no longer exists.", flags: MessageFlags.Ephemeral }); type.pingRoleId = interaction.values[0]; await settings.save(); return interaction.update(typeManager(config, type.id, "✅ Ping and claim role updated.")); }
