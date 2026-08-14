@@ -20,7 +20,7 @@ const est = value => new Intl.DateTimeFormat("en-US", { timeZone: "Etc/GMT+5", y
 
 export function panel(settings, notice = "Create a matchup or manage an existing one.") {
   const matches = [...settings.schedules].sort((a, b) => String(a.scheduledAt).localeCompare(String(b.scheduledAt)));
-  const components = [row(new ButtonBuilder().setCustomId("schedule:create").setLabel("Create Match").setStyle(ButtonStyle.Success).setEmoji("➕").setDisabled((settings.teamSnapshot.teams || []).length < 2))];
+  const components = [row(new ButtonBuilder().setCustomId("schedule:create").setLabel("Create Match").setStyle(ButtonStyle.Success).setEmoji("➕"))];
   if (matches.length) components.unshift(select("schedule:view", "Select a scheduled match", matches.slice(0, 25).map(match => ({ label: `${teamName(settings, match.teamOne)} vs ${teamName(settings, match.teamTwo)}`.slice(0, 100), value: match.id, description: `${stages.find(stage => stage.id === match.stage)?.label || match.stage} • ${est(match.scheduledAt)}`.slice(0, 100) }))));
   return { embeds: [new EmbedBuilder().setTitle("MPCS SCHEDULE MANAGER").setDescription(`${notice}\n\n**ALL TIMES ARE EST (UTC−5).**`).setColor(0x00e5ff).addFields({ name: "Scheduled Matches", value: matches.length ? matches.slice(0, 15).map(match => `**${teamName(settings, match.teamOne)} vs ${teamName(settings, match.teamTwo)}**\n${stages.find(stage => stage.id === match.stage)?.label || match.stage} • ${formatText(match.bestOf)} • ${est(match.scheduledAt)}`).join("\n\n") : "No matches scheduled." })], components };
 }
@@ -41,7 +41,7 @@ function parseEst(raw) {
 export async function handleSchedule(interaction, settings) {
   if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return interaction.reply({ content: "You need Manage Server.", flags: MessageFlags.Ephemeral });
   const [, action, id] = interaction.customId.split(":"), draftKey = key(interaction); let draft = drafts.get(draftKey);
-  if (action === "create") { drafts.set(draftKey, {}); return interaction.update(chooseStage()); }
+  if (action === "create") { const count=(settings.teamSnapshot.teams||[]).length;if(count<2)return interaction.reply({content:`The bot currently sees **${count} synchronized Minecraft team${count===1?'':'s'}**. Create at least two teams with \`/team\` in Minecraft, then wait about 10 seconds and run \`/schedule\` again.`,flags:MessageFlags.Ephemeral});drafts.set(draftKey, {}); return interaction.update(chooseStage()); }
   if (action === "stage") { draft.stage = interaction.values[0]; drafts.set(draftKey, draft); return interaction.update(chooseTeam(settings, draft, 1)); }
   if (action === "team1") { draft.teamOne = interaction.values[0]; drafts.set(draftKey, draft); return interaction.update(chooseTeam(settings, draft, 2)); }
   if (action === "team2") {
