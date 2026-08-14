@@ -5,6 +5,7 @@ import { secretsMatch, validateChatPayload } from "./bridge-utils.js";
 import { SettingsStore } from "./settings-store.js";
 import { RadioService } from "./radio-service.js";
 import { teamsCommand, panel as teamsPanel, handleTeams } from "./teams-ui.js";
+import { embedCommand, sayCommand, statsCommand, openEmbed, handleEmbed, say, serverStats } from "./admin-ui.js";
 
 const required = ["DISCORD_TOKEN", "BRIDGE_SECRET"];
 const missing = required.filter((name) => !process.env[name]);
@@ -195,8 +196,10 @@ client.once("clientReady", async () => {
   try {
     console.log("MPCS bot build: railway-radio-native-ffmpeg-v2");
     if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON()]);
-    if (mainGuildId) await (await client.guilds.fetch(mainGuildId)).commands.set([setRadioCommand.toJSON(),teamsCommand.toJSON()]);
-    if (!staffGuildId && !mainGuildId) await client.application.commands.set([setChatCommand.toJSON(), setRadioCommand.toJSON(),teamsCommand.toJSON()]);
+    const publicCommands=[embedCommand.toJSON(),sayCommand.toJSON(),statsCommand.toJSON()];
+    if (mainGuildId) await (await client.guilds.fetch(mainGuildId)).commands.set([setRadioCommand.toJSON(),teamsCommand.toJSON(),...publicCommands]);
+    if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON(),...publicCommands]);
+    if (!staffGuildId && !mainGuildId) await client.application.commands.set([setChatCommand.toJSON(),setRadioCommand.toJSON(),teamsCommand.toJSON(),...publicCommands]);
     else await client.application.commands.set([]);
     const savedChannelId = await settings.load();
     const initialChannelId = savedChannelId || process.env.DISCORD_CHANNEL_ID;
@@ -215,6 +218,10 @@ client.once("clientReady", async () => {
 });
 
 client.on("interactionCreate", async (interaction) => {
+  if(interaction.isChatInputCommand()&&interaction.commandName==="embed")return void await openEmbed(interaction);
+  if(interaction.isChatInputCommand()&&interaction.commandName==="say")return void await say(interaction);
+  if(interaction.isChatInputCommand()&&interaction.commandName==="serverstats")return void await serverStats(interaction,settings,client);
+  if((interaction.isButton()||interaction.isModalSubmit())&&interaction.customId.startsWith("embed:")){await handleEmbed(interaction);return;}
   if(interaction.isChatInputCommand()&&interaction.commandName==="teams"){if(mainGuildId&&interaction.guildId!==mainGuildId)return void interaction.reply({content:"This command is only available in the main server.",flags:MessageFlags.Ephemeral});return void interaction.reply({...teamsPanel(settings),flags:MessageFlags.Ephemeral});}
   if((interaction.isButton()||interaction.isStringSelectMenu()||interaction.isUserSelectMenu()||interaction.isModalSubmit())&&interaction.customId.startsWith("teams:")){await handleTeams(interaction,settings);return;}
   if (!interaction.isChatInputCommand() || !["setchat", "setradio"].includes(interaction.commandName)) return;
