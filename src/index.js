@@ -6,6 +6,7 @@ import { SettingsStore } from "./settings-store.js";
 import { RadioService } from "./radio-service.js";
 import { teamsCommand, panel as teamsPanel, handleTeams } from "./teams-ui.js";
 import { embedCommand, sayCommand, statsCommand, openEmbed, handleEmbed, say, serverStats } from "./admin-ui.js";
+import { scheduleCommand, panel as schedulePanel, handleSchedule } from "./schedule-ui.js";
 
 const required = ["DISCORD_TOKEN", "BRIDGE_SECRET"];
 const missing = required.filter((name) => !process.env[name]);
@@ -209,7 +210,7 @@ client.once("clientReady", async () => {
   try {
     console.log("MPCS bot build: railway-radio-native-ffmpeg-v2");
     if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON()]);
-    const publicCommands=[embedCommand.toJSON(),sayCommand.toJSON(),statsCommand.toJSON()];
+    const publicCommands=[embedCommand.toJSON(),sayCommand.toJSON(),statsCommand.toJSON(),scheduleCommand.toJSON()];
     if (mainGuildId) await (await client.guilds.fetch(mainGuildId)).commands.set([setRadioCommand.toJSON(),teamsCommand.toJSON(),...publicCommands]);
     if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON(),...publicCommands]);
     if (!staffGuildId && !mainGuildId) await client.application.commands.set([setChatCommand.toJSON(),setRadioCommand.toJSON(),teamsCommand.toJSON(),...publicCommands]);
@@ -231,6 +232,8 @@ client.once("clientReady", async () => {
 });
 
 client.on("interactionCreate", async (interaction) => {
+  if(interaction.isChatInputCommand()&&interaction.commandName==="schedule")return void await interaction.reply({...schedulePanel(settings),flags:MessageFlags.Ephemeral});
+  if((interaction.isButton()||interaction.isStringSelectMenu()||interaction.isModalSubmit())&&interaction.customId.startsWith("schedule:")){await handleSchedule(interaction,settings);return;}
   if(interaction.isChatInputCommand()&&interaction.commandName==="embed")return void await openEmbed(interaction);
   if(interaction.isChatInputCommand()&&interaction.commandName==="say")return void await say(interaction);
   if(interaction.isChatInputCommand()&&interaction.commandName==="serverstats")return void await serverStats(interaction,settings,client);
