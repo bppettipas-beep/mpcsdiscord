@@ -5,7 +5,7 @@ export const ticketCommand = new SlashCommandBuilder()
   .setName("ticket")
   .setDescription("Set up or manage support tickets")
   .addSubcommand(command => command.setName("panel").setDescription("Open the ticket control panel"))
-  .addSubcommand(command => command.setName("edit").setDescription("Edit the configured ticket panel"))
+  .addSubcommand(command => command.setName("edit").setDescription("Edit a specific posted ticket panel").addStringOption(option => option.setName("message-id").setDescription("The Discord message ID of the ticket panel").setRequired(true).setMinLength(17).setMaxLength(20)))
   .addSubcommand(command => command.setName("close").setDescription("Close the current ticket"))
   .addSubcommand(command => command.setName("request-close").setDescription("Ask the ticket opener for permission to close"));
 
@@ -26,6 +26,9 @@ const ticketKey = interaction => `${interaction.guildId}:${interaction.user.id}`
 const safeName = name => name.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 70) || "member";
 const configFor = (settings, guildId) => settings.ticketConfig[guildId];
 const ticketInChannel = (settings, channelId) => Object.entries(settings.tickets).find(([, ticket]) => ticket.channelId === channelId);
+const snapshot = config => JSON.parse(JSON.stringify({ appearance: appearance(config), ticketTypes: ticketTypes(config), layout: config.layout || "buttons" }));
+const applySnapshot = (config, value) => { config.appearance = JSON.parse(JSON.stringify(value.appearance || {})); config.ticketTypes = JSON.parse(JSON.stringify(value.ticketTypes || [])); config.layout = value.layout === "dropdown" ? "dropdown" : "buttons"; };
+const panelConfigForMessage = (config, messageId) => { const saved = config?.panels?.[messageId]?.snapshot; return saved ? { ...config, ...JSON.parse(JSON.stringify(saved)) } : config; };
 
 function typeManager(config, selectedId, notice = "Add a ticket type or select one to edit it.") {
   const types = ticketTypes(config), selected = types.find(type => type.id === selectedId);
@@ -48,6 +51,7 @@ function controlPanel(settings, guildId, notice = "Use the selectors below—eve
       { name: "Default Support Role", value: config.supportRoleId ? `<@&${config.supportRoleId}>` : "Not selected", inline: true },
       { name: "New Tickets", value: config.enabled === false ? "🔴 Disabled" : "🟢 Enabled", inline: true },
       { name: "Open Tickets", value: String(Object.keys(settings.tickets).filter(key => key.startsWith(`${guildId}:`)).length), inline: true },
+      { name: "Tracked Panels", value: String(Object.keys(config.panels || {}).length), inline: true },
       { name: "Panel Appearance", value: `**${look.title}**\n${look.description.slice(0, 160)}${look.description.length > 160 ? "…" : ""}\n**${ticketTypes(config).length} customizable ticket button${ticketTypes(config).length === 1 ? "" : "s"}**` }
     ).setFooter({ text: "Settings persist automatically across restarts" })],
     components: [
@@ -89,11 +93,19 @@ export async function handleTicketCommand(interaction, settings) {
   if (subcommand === "close") return requestClose(interaction, settings);
   if (subcommand === "request-close") return requestOwnerClose(interaction, settings);
   if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return interaction.reply({ content: "You need Manage Server permission to open the ticket control panel.", flags: MessageFlags.Ephemeral });
-  return interaction.reply({ ...controlPanel(settings, interaction.guildId, subcommand === "edit" ? "Edit the live panel below, then click **Update Live**." : undefined), flags: MessageFlags.Ephemeral });
+  if (subcommand === "edit") {
+    const messageId = interaction.options.getString("message-id", true).trim(), config = settings.ticketConfig[interaction.guildId] ||= { enabled: true }; let saved = config.panels?.[messageId];
+    if (!/^\d{17,20}$/.test(messageId)) return interaction.reply({ content: "Enter a valid Discord message ID.", flags: MessageFlags.Ephemeral });
+    if (!saved && config.livePanel?.messageId === messageId) { saved = { channelId: config.livePanel.channelId, snapshot: snapshot(config) }; config.panels ||= {}; config.panels[messageId] = saved; }
+    if (!saved) return interaction.reply({ content: "I do not recognize that ticket panel. Use the message ID of a panel posted by this bot after the multi-panel update.", flags: MessageFlags.Ephemeral });
+    applySnapshot(config, saved.snapshot); config.livePanel = { channelId: saved.channelId, messageId }; await settings.save();
+    return interaction.reply({ ...controlPanel(settings, interaction.guildId, `Editing panel message **${messageId}**. Make changes, then click **Update Live**.`), flags: MessageFlags.Ephemeral });
+  }
+  return interaction.reply({ ...controlPanel(settings, interaction.guildId), flags: MessageFlags.Ephemeral });
 }
 
 export async function handleTicketComponent(interaction, settings) {
-  let [, action, targetId] = interaction.customId.split(":");
+  let [, action, targetId, sourcePanelId] = interaction.customId.split(":");
   if (action === "open-select") { action = "open"; targetId = interaction.values[0]; }
   if (["config-panel", "config-category", "config-role", "edit-appearance", "save-appearance", "manage-buttons", "layout", "type-select", "type-role", "add-type", "edit-type", "save-type", "edit-questions", "save-questions", "type-style", "delete-type", "back-control", "post-panel", "update-panel", "toggle", "refresh"].includes(action)) {
     if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return interaction.reply({ content: "You need Manage Server permission to use this control panel.", flags: MessageFlags.Ephemeral });
@@ -135,11 +147,11 @@ export async function handleTicketComponent(interaction, settings) {
     if (action === "toggle") config.enabled = config.enabled === false;
     if (["config-panel", "config-category", "config-role", "toggle"].includes(action)) { await settings.save(); return interaction.update(controlPanel(settings, interaction.guildId, "✅ Setting saved.")); }
     if (action === "refresh") return interaction.update(controlPanel(settings, interaction.guildId, "Control panel refreshed."));
-    if (action === "update-panel") { const live = config.livePanel, channel = live ? await interaction.guild.channels.fetch(live.channelId).catch(() => null) : null, message = channel?.isTextBased() ? await channel.messages.fetch(live.messageId).catch(() => null) : null; if (!message) { delete config.livePanel; await settings.save(); return interaction.update(controlPanel(settings, interaction.guildId, "❌ The live panel message no longer exists. Post a new one.")); } const updated = await message.edit(panel(config)).then(() => true).catch(() => false); return interaction.update(controlPanel(settings, interaction.guildId, updated ? "✅ Live ticket panel updated." : "❌ I could not edit the live panel. Check my permissions.")); }
+    if (action === "update-panel") { const live = config.livePanel, channel = live ? await interaction.guild.channels.fetch(live.channelId).catch(() => null) : null, message = channel?.isTextBased() ? await channel.messages.fetch(live.messageId).catch(() => null) : null; if (!message) { delete config.livePanel; await settings.save(); return interaction.update(controlPanel(settings, interaction.guildId, "❌ The selected panel message no longer exists. Post a new one.")); } const updated = await message.edit(panel(config)).then(() => true).catch(() => false); if(updated){config.panels||={};config.panels[live.messageId]={channelId:live.channelId,snapshot:snapshot(config)};await settings.save();}return interaction.update(controlPanel(settings, interaction.guildId, updated ? `✅ Panel **${live.messageId}** updated.` : "❌ I could not edit that panel. Check my permissions.")); }
     const panelChannel = await interaction.guild.channels.fetch(config.panelChannelId).catch(() => null), category = await interaction.guild.channels.fetch(config.categoryId).catch(() => null), supportRole = interaction.guild.roles.cache.get(config.supportRoleId), me = interaction.guild.members.me;
     if (!panelChannel?.isSendable() || category?.type !== ChannelType.GuildCategory || !supportRole) return interaction.update(controlPanel(settings, interaction.guildId, "❌ One of your selections no longer exists. Select it again."));
     if (!panelChannel.permissionsFor(me)?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks]) || !me.permissions.has(PermissionFlagsBits.ManageChannels)) return interaction.update(controlPanel(settings, interaction.guildId, "❌ I need Manage Channels plus View Channel, Send Messages, and Embed Links in the selected panel channel."));
-    const posted = await panelChannel.send(panel(config)); config.livePanel = { channelId: panelChannel.id, messageId: posted.id }; await settings.save();
+    const posted = await panelChannel.send(panel(config)); config.livePanel = { channelId: panelChannel.id, messageId: posted.id }; config.panels ||= {}; config.panels[posted.id] = { channelId: panelChannel.id, snapshot: snapshot(config) }; await settings.save();
     return interaction.update(controlPanel(settings, interaction.guildId, `✅ Ticket panel posted in ${panelChannel}.`));
   }
   if (action === "close") return requestClose(interaction, settings);
@@ -163,14 +175,14 @@ export async function handleTicketComponent(interaction, settings) {
     return;
   }
   if (!["open", "answers"].includes(action)) return;
-  const config = configFor(settings, interaction.guildId);
+  const baseConfig = configFor(settings, interaction.guildId), config = panelConfigForMessage(baseConfig, sourcePanelId || interaction.message?.id);
   if (!config || config.enabled === false) return interaction.reply({ content: config?.enabled === false ? "New tickets are currently disabled." : "The ticket system has not been configured yet.", flags: MessageFlags.Ephemeral });
   const type = ticketTypes(config).find(entry => entry.id === targetId) || (!targetId ? ticketTypes(config)[0] : null);
   if (!type) return interaction.reply({ content: "That ticket type is no longer available. Please use the newest ticket panel.", flags: MessageFlags.Ephemeral });
   const questions = type.questions || [];
   if (action === "open" && questions.length) {
     const inputs = questions.map((question, index) => row(new TextInputBuilder().setCustomId(`answer-${index}`).setLabel(`Question ${index + 1}`).setPlaceholder(question).setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000)));
-    return interaction.showModal(new ModalBuilder().setCustomId(`ticket:answers:${type.id}`).setTitle(`${type.name} Ticket Questions`.slice(0, 45)).addComponents(...inputs));
+    return interaction.showModal(new ModalBuilder().setCustomId(`ticket:answers:${type.id}:${interaction.message.id}`).setTitle(`${type.name} Ticket Questions`.slice(0, 45)).addComponents(...inputs));
   }
   const answers = action === "answers" ? questions.map((question, index) => ({ question, answer: interaction.fields.getTextInputValue(`answer-${index}`).trim() })) : [];
   const key = ticketKey(interaction), existing = settings.tickets[key];
