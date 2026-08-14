@@ -14,7 +14,7 @@ if (missing.length) {
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.DirectMessages, GatewayIntentBits.MessageContent], partials: [Partials.Channel] });
 const settings = new SettingsStore(process.env.CONFIG_PATH || "/data/config.json");
-const radio = new RadioService(client, process.env.RADIO_STREAM_URL || "https://ais-sa1.streamon.fm/7232_128k.aac/playlist.m3u8");
+const radio = new RadioService(client, process.env.RADIO_STREAM_URL || "https://stream.revma.ihrhls.com/zc185");
 const outgoing = [];
 let discordChannel;
 let flushing = false;
@@ -27,7 +27,7 @@ const setChatCommand = new SlashCommandBuilder()
     .setName("channel-id")
     .setDescription("The Discord channel ID")
     .setRequired(true));
-const setRadioCommand = new SlashCommandBuilder().setName("setradio").setDescription("Play 91.9 The Bend in a voice channel").setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).addStringOption((option) => option.setName("channel-id").setDescription("Voice channel ID, or off to disconnect").setRequired(true));
+const setRadioCommand = new SlashCommandBuilder().setName("setradio").setDescription("Play 102.7 KIIS-FM Los Angeles in a voice channel").setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).addStringOption((option) => option.setName("channel-id").setDescription("Voice channel ID, or off to disconnect").setRequired(true));
 
 async function selectDiscordChannel(channelId) {
   const channel = await client.channels.fetch(channelId);
@@ -182,7 +182,7 @@ client.on("interactionCreate", async (interaction) => {
       const voiceId=raw.replace(/^<#(\d+)>$/,"$1"); if(!/^\d{17,20}$/.test(voiceId))throw new Error("Enter a valid voice channel ID.");
       const voice=await client.channels.fetch(voiceId);if(!voice?.isVoiceBased()||voice.guildId!==interaction.guildId)throw new Error("That is not a voice channel in this server.");
       if(!voice.permissionsFor(client.user)?.has([PermissionFlagsBits.ViewChannel,PermissionFlagsBits.Connect,PermissionFlagsBits.Speak]))throw new Error("The bot needs View Channel, Connect, and Speak there.");
-      await radio.connect(voice);settings.radioChannelId=voice.id;await settings.save();await interaction.editReply(`Now playing **91.9 The Bend** in <#${voice.id}>.`);return;
+      await radio.connect(voice);settings.radioChannelId=voice.id;await settings.save();await interaction.editReply(`Now playing **102.7 KIIS-FM Los Angeles** in <#${voice.id}>.`);return;
     }
     const channelId = raw.replace(/^<#(\d+)>$/, "$1");
     if (!/^\d{17,20}$/.test(channelId)) throw new Error("Enter a valid Discord channel ID.");

@@ -37,9 +37,9 @@ Restart Minecraft after editing it. Existing MPCS configuration files are preser
 
 The Railway health endpoint is `/health`. It returns HTTP 200 after the bot has connected to Discord.
 
-## 91.9 The Bend radio
+## 102.7 KIIS-FM Los Angeles radio
 
-Run `/setradio channel-id:VOICE_CHANNEL_ID` with **Manage Server** permission. The bot joins that voice channel and continuously plays 91.9 The Bend from Moncton. Run `/setradio channel-id:off` to disconnect it. The bot needs **View Channel**, **Connect**, and **Speak** permissions.
+Run `/setradio channel-id:VOICE_CHANNEL_ID` with **Manage Server** permission. The bot joins that voice channel and continuously plays 102.7 KIIS-FM, LA's Top 40/pop station. Run `/setradio channel-id:off` to disconnect it. The bot needs **View Channel**, **Connect**, and **Speak** permissions.
 
 Railway builds the included `Dockerfile`, which installs native Linux FFmpeg automatically.
 
