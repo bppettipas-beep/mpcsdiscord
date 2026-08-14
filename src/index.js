@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { createServer } from "node:http";
-import { Client, GatewayIntentBits, ActivityType, escapeMarkdown, PermissionFlagsBits, SlashCommandBuilder, Partials, MessageFlags } from "discord.js";
+import { Client, GatewayIntentBits, ActivityType, escapeMarkdown, PermissionFlagsBits, SlashCommandBuilder, MessageFlags } from "discord.js";
 import { secretsMatch, validateChatPayload } from "./bridge-utils.js";
 import { SettingsStore } from "./settings-store.js";
 import { RadioService } from "./radio-service.js";
@@ -15,7 +15,7 @@ if (missing.length) {
   process.exit(1);
 }
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.DirectMessages, GatewayIntentBits.MessageContent], partials: [Partials.Channel] });
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildVoiceStates] });
 const settings = new SettingsStore(process.env.CONFIG_PATH || "/data/config.json");
 const radio = new RadioService(client, process.env.RADIO_STREAM_URL || "https://stream.revma.ihrhls.com/zc185");
 const mainGuildId = process.env.MAIN_GUILD_ID || null;
@@ -34,6 +34,15 @@ const setChatCommand = new SlashCommandBuilder()
     .setDescription("The Discord channel ID")
     .setRequired(true));
 const setRadioCommand = new SlashCommandBuilder().setName("setradio").setDescription("Play 102.7 KIIS-FM Los Angeles in a voice channel").setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).addStringOption((option) => option.setName("channel-id").setDescription("Voice channel ID, or off to disconnect").setRequired(true));
+const linkCommand = new SlashCommandBuilder()
+  .setName("link")
+  .setDescription("Link your Discord account to your Minecraft account")
+  .addStringOption((option) => option
+    .setName("code")
+    .setDescription("The six-digit code from /link in Minecraft")
+    .setRequired(true)
+    .setMinLength(6)
+    .setMaxLength(6));
 
 async function selectDiscordChannel(channelId) {
   const channel = await client.channels.fetch(channelId);
@@ -192,16 +201,6 @@ async function reconcileTeamMembers() {
   }
 }
 
-client.on("messageCreate", async (message) => {
-  if (message.author.bot || message.guild) return;
-  const code = message.content.trim();
-  const pending = settings.pending[code];
-  if (!pending || pending.expires < Date.now()) { if (pending) { delete settings.pending[code]; await settings.save(); } await message.reply("That link code is invalid or expired. Run /link in Minecraft again."); return; }
-  for (const [uuid, discordId] of Object.entries(settings.links)) if (discordId === message.author.id) delete settings.links[uuid];
-  settings.links[pending.uuid] = message.author.id; delete settings.pending[code]; await settings.save();
-  await message.reply(`Linked your Discord account to Minecraft player **${pending.player}**.`);
-});
-
 const port = Number(process.env.PORT) || 3000;
 server.listen(port, "0.0.0.0", () => console.log(`HTTP bridge listening on port ${port}.`));
 setInterval(() => void flushOutgoing(), 500);
@@ -210,7 +209,7 @@ client.once("clientReady", async () => {
   try {
     console.log("MPCS bot build: railway-radio-native-ffmpeg-v2");
     if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON()]);
-    const publicCommands=[embedCommand.toJSON(),sayCommand.toJSON(),statsCommand.toJSON(),scheduleCommand.toJSON()];
+    const publicCommands=[linkCommand.toJSON(),embedCommand.toJSON(),sayCommand.toJSON(),statsCommand.toJSON(),scheduleCommand.toJSON()];
     if (mainGuildId) await (await client.guilds.fetch(mainGuildId)).commands.set([setRadioCommand.toJSON(),teamsCommand.toJSON(),...publicCommands]);
     if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON(),...publicCommands]);
     if (!staffGuildId && !mainGuildId) await client.application.commands.set([setChatCommand.toJSON(),setRadioCommand.toJSON(),teamsCommand.toJSON(),...publicCommands]);
@@ -232,6 +231,17 @@ client.once("clientReady", async () => {
 });
 
 client.on("interactionCreate", async (interaction) => {
+  if(interaction.isChatInputCommand()&&interaction.commandName==="link"){
+    const code=interaction.options.getString("code",true).trim();
+    const pending=settings.pending[code];
+    if(!/^\d{6}$/.test(code)||!pending||pending.expires<Date.now()){
+      if(pending){delete settings.pending[code];await settings.save();}
+      await interaction.reply({content:"That link code is invalid or expired. Run `/link` in Minecraft again.",flags:MessageFlags.Ephemeral});return;
+    }
+    for(const [uuid,discordId] of Object.entries(settings.links))if(discordId===interaction.user.id)delete settings.links[uuid];
+    settings.links[pending.uuid]=interaction.user.id;delete settings.pending[code];await settings.save();
+    await interaction.reply({content:`Linked your Discord account to Minecraft player **${pending.player}**.`,flags:MessageFlags.Ephemeral});return;
+  }
   if(interaction.isChatInputCommand()&&interaction.commandName==="schedule")return void await interaction.reply({...schedulePanel(settings),flags:MessageFlags.Ephemeral});
   if((interaction.isButton()||interaction.isStringSelectMenu()||interaction.isModalSubmit())&&interaction.customId.startsWith("schedule:")){await handleSchedule(interaction,settings);return;}
   if(interaction.isChatInputCommand()&&interaction.commandName==="embed")return void await openEmbed(interaction);
