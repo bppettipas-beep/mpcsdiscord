@@ -1,4 +1,4 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelSelectMenuBuilder, ChannelType, EmbedBuilder, MessageFlags, PermissionFlagsBits, RoleSelectMenuBuilder, SlashCommandBuilder } from "discord.js";
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelSelectMenuBuilder, ChannelType, EmbedBuilder, MessageFlags, ModalBuilder, PermissionFlagsBits, RoleSelectMenuBuilder, SlashCommandBuilder, TextInputBuilder, TextInputStyle } from "discord.js";
 
 export const ticketCommand = new SlashCommandBuilder()
   .setName("ticket")
@@ -7,10 +7,12 @@ export const ticketCommand = new SlashCommandBuilder()
   .addSubcommand(command => command.setName("close").setDescription("Close the current ticket"));
 
 const row = (...components) => new ActionRowBuilder().addComponents(...components);
-const panel = () => ({
-  embeds: [new EmbedBuilder().setColor(0x00e5ff).setTitle("MPCS SUPPORT").setDescription("Need help? Open a private ticket and a staff member will assist you.\n\nPlease create only one ticket at a time.").setFooter({ text: "MPCS Support System" })],
-  components: [row(new ButtonBuilder().setCustomId("ticket:open").setLabel("Open Ticket").setEmoji("🎫").setStyle(ButtonStyle.Primary))]
-});
+const appearance = config => ({ title: config?.appearance?.title || "MPCS SUPPORT", description: config?.appearance?.description || "Need help? Open a private ticket and a staff member will assist you.\n\nPlease create only one ticket at a time.", footer: config?.appearance?.footer || "MPCS Support System", buttonLabel: config?.appearance?.buttonLabel || "Open Ticket", buttonStyle: config?.appearance?.buttonStyle || "Primary" });
+const styles = { Primary: ButtonStyle.Primary, Success: ButtonStyle.Success, Secondary: ButtonStyle.Secondary, Danger: ButtonStyle.Danger };
+const panel = config => {
+  const look = appearance(config);
+  return { embeds: [new EmbedBuilder().setColor(0x00e5ff).setTitle(look.title).setDescription(look.description).setFooter({ text: look.footer })], components: [row(new ButtonBuilder().setCustomId("ticket:open").setLabel(look.buttonLabel).setEmoji("🎫").setStyle(styles[look.buttonStyle] || ButtonStyle.Primary))] };
+};
 const closeRow = () => row(new ButtonBuilder().setCustomId("ticket:close").setLabel("Close Ticket").setEmoji("🔒").setStyle(ButtonStyle.Danger));
 const ticketKey = interaction => `${interaction.guildId}:${interaction.user.id}`;
 const safeName = name => name.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 70) || "member";
@@ -19,6 +21,7 @@ const ticketInChannel = (settings, channelId) => Object.entries(settings.tickets
 
 function controlPanel(settings, guildId, notice = "Use the selectors below—everything saves automatically.") {
   const config = configFor(settings, guildId) || {};
+  const look = appearance(config);
   const ready = Boolean(config.panelChannelId && config.categoryId && config.supportRoleId);
   return {
     content: "",
@@ -27,13 +30,14 @@ function controlPanel(settings, guildId, notice = "Use the selectors below—eve
       { name: "Private Ticket Category", value: config.categoryId ? `<#${config.categoryId}>` : "Not selected", inline: true },
       { name: "Support Team", value: config.supportRoleId ? `<@&${config.supportRoleId}>` : "Not selected", inline: true },
       { name: "New Tickets", value: config.enabled === false ? "🔴 Disabled" : "🟢 Enabled", inline: true },
-      { name: "Open Tickets", value: String(Object.keys(settings.tickets).filter(key => key.startsWith(`${guildId}:`)).length), inline: true }
+      { name: "Open Tickets", value: String(Object.keys(settings.tickets).filter(key => key.startsWith(`${guildId}:`)).length), inline: true },
+      { name: "Panel Appearance", value: `**${look.title}**\n${look.description.slice(0, 160)}${look.description.length > 160 ? "…" : ""}\nButton: **${look.buttonLabel}** (${look.buttonStyle})` }
     ).setFooter({ text: "Settings persist automatically across restarts" })],
     components: [
       row(new ChannelSelectMenuBuilder().setCustomId("ticket:config-panel").setPlaceholder("1. Select the public ticket-panel channel").setChannelTypes(ChannelType.GuildText).setMinValues(1).setMaxValues(1)),
       row(new ChannelSelectMenuBuilder().setCustomId("ticket:config-category").setPlaceholder("2. Select the private ticket category").setChannelTypes(ChannelType.GuildCategory).setMinValues(1).setMaxValues(1)),
       row(new RoleSelectMenuBuilder().setCustomId("ticket:config-role").setPlaceholder("3. Select the staff support role").setMinValues(1).setMaxValues(1)),
-      row(new ButtonBuilder().setCustomId("ticket:post-panel").setLabel("Post Ticket Panel").setEmoji("📨").setStyle(ButtonStyle.Success).setDisabled(!ready), new ButtonBuilder().setCustomId("ticket:toggle").setLabel(config.enabled === false ? "Enable New Tickets" : "Disable New Tickets").setStyle(config.enabled === false ? ButtonStyle.Success : ButtonStyle.Danger), new ButtonBuilder().setCustomId("ticket:refresh").setLabel("Refresh").setStyle(ButtonStyle.Secondary))
+      row(new ButtonBuilder().setCustomId("ticket:edit-appearance").setLabel("Edit Text & Button").setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId("ticket:button-style").setLabel(`Style: ${look.buttonStyle}`).setStyle(ButtonStyle.Secondary), new ButtonBuilder().setCustomId("ticket:post-panel").setLabel("Post Panel").setEmoji("📨").setStyle(ButtonStyle.Success).setDisabled(!ready), new ButtonBuilder().setCustomId("ticket:toggle").setLabel(config.enabled === false ? "Enable" : "Disable").setStyle(config.enabled === false ? ButtonStyle.Success : ButtonStyle.Danger), new ButtonBuilder().setCustomId("ticket:refresh").setLabel("Refresh").setStyle(ButtonStyle.Secondary))
     ]
   };
 }
@@ -60,9 +64,18 @@ export async function handleTicketCommand(interaction, settings) {
 
 export async function handleTicketComponent(interaction, settings) {
   const action = interaction.customId.split(":")[1];
-  if (["config-panel", "config-category", "config-role", "post-panel", "toggle", "refresh"].includes(action)) {
+  if (["config-panel", "config-category", "config-role", "edit-appearance", "save-appearance", "button-style", "post-panel", "toggle", "refresh"].includes(action)) {
     if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return interaction.reply({ content: "You need Manage Server permission to use this control panel.", flags: MessageFlags.Ephemeral });
     const config = settings.ticketConfig[interaction.guildId] ||= { enabled: true };
+    if (action === "edit-appearance") {
+      const look = appearance(config), input = (id, label, value, style, max) => new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId(id).setLabel(label).setValue(value).setStyle(style).setRequired(true).setMaxLength(max));
+      return interaction.showModal(new ModalBuilder().setCustomId("ticket:save-appearance").setTitle("Customize Ticket Panel").addComponents(input("title", "Panel title", look.title, TextInputStyle.Short, 256), input("description", "Panel message", look.description, TextInputStyle.Paragraph, 4000), input("footer", "Panel footer", look.footer, TextInputStyle.Short, 2048), input("button-label", "Open-ticket button text", look.buttonLabel, TextInputStyle.Short, 80)));
+    }
+    if (action === "save-appearance") {
+      config.appearance = { ...appearance(config), title: interaction.fields.getTextInputValue("title").trim(), description: interaction.fields.getTextInputValue("description").trim(), footer: interaction.fields.getTextInputValue("footer").trim(), buttonLabel: interaction.fields.getTextInputValue("button-label").trim() };
+      await settings.save(); return interaction.update(controlPanel(settings, interaction.guildId, "✅ Ticket panel text and button saved."));
+    }
+    if (action === "button-style") { const names = Object.keys(styles), current = appearance(config).buttonStyle; config.appearance = { ...appearance(config), buttonStyle: names[(names.indexOf(current) + 1) % names.length] }; await settings.save(); return interaction.update(controlPanel(settings, interaction.guildId, "✅ Button style updated.")); }
     if (action === "config-panel") config.panelChannelId = interaction.values[0];
     if (action === "config-category") config.categoryId = interaction.values[0];
     if (action === "config-role") config.supportRoleId = interaction.values[0];
@@ -72,7 +85,7 @@ export async function handleTicketComponent(interaction, settings) {
     const panelChannel = await interaction.guild.channels.fetch(config.panelChannelId).catch(() => null), category = await interaction.guild.channels.fetch(config.categoryId).catch(() => null), supportRole = interaction.guild.roles.cache.get(config.supportRoleId), me = interaction.guild.members.me;
     if (!panelChannel?.isSendable() || category?.type !== ChannelType.GuildCategory || !supportRole) return interaction.update(controlPanel(settings, interaction.guildId, "❌ One of your selections no longer exists. Select it again."));
     if (!panelChannel.permissionsFor(me)?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks]) || !me.permissions.has(PermissionFlagsBits.ManageChannels)) return interaction.update(controlPanel(settings, interaction.guildId, "❌ I need Manage Channels plus View Channel, Send Messages, and Embed Links in the selected panel channel."));
-    await panelChannel.send(panel());
+    await panelChannel.send(panel(config));
     return interaction.update(controlPanel(settings, interaction.guildId, `✅ Ticket panel posted in ${panelChannel}.`));
   }
   if (action === "close") return requestClose(interaction, settings);

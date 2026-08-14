@@ -243,7 +243,7 @@ client.once("clientReady", async () => {
 
 client.on("interactionCreate", async (interaction) => {
   if(interaction.isChatInputCommand()&&interaction.commandName==="ticket"){if(mainGuildId&&interaction.guildId!==mainGuildId)return void interaction.reply({content:"Tickets are only available in the main server.",flags:MessageFlags.Ephemeral});return void await handleTicketCommand(interaction,settings);}
-  if((interaction.isButton()||interaction.isChannelSelectMenu()||interaction.isRoleSelectMenu())&&interaction.customId.startsWith("ticket:")){await handleTicketComponent(interaction,settings);return;}
+  if((interaction.isButton()||interaction.isChannelSelectMenu()||interaction.isRoleSelectMenu()||interaction.isModalSubmit())&&interaction.customId.startsWith("ticket:")){await handleTicketComponent(interaction,settings);return;}
   if(interaction.isChatInputCommand()&&interaction.commandName==="link"){
     const code=interaction.options.getString("code",true).trim();
     const pending=settings.pending[code];
