@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { createServer } from "node:http";
-import { Client, GatewayIntentBits, ActivityType, escapeMarkdown, PermissionFlagsBits, SlashCommandBuilder, MessageFlags } from "discord.js";
+import { Client, GatewayIntentBits, Partials, ActivityType, escapeMarkdown, PermissionFlagsBits, SlashCommandBuilder, MessageFlags } from "discord.js";
 import { secretsMatch, validateChatPayload } from "./bridge-utils.js";
 import { SettingsStore } from "./settings-store.js";
 import { RadioService } from "./radio-service.js";
@@ -8,6 +8,8 @@ import { teamsCommand, panel as teamsPanel, handleTeams } from "./teams-ui.js";
 import { embedCommand, sayCommand, statsCommand, openEmbed, handleEmbed, say, serverStats } from "./admin-ui.js";
 import { scheduleCommand, panel as schedulePanel, handleSchedule } from "./schedule-ui.js";
 import { ticketCommand, handleTicketCommand, handleTicketComponent } from "./ticket-ui.js";
+import { automodCommand, AutoModService } from "./automod-service.js";
+import { logsCommand, AuditLogService } from "./audit-log-service.js";
 
 const required = ["DISCORD_TOKEN", "BRIDGE_SECRET"];
 const missing = required.filter((name) => !process.env[name]);
@@ -16,11 +18,13 @@ if (missing.length) {
   process.exit(1);
 }
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildVoiceStates] });
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildModeration, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent], partials:[Partials.Message,Partials.Channel,Partials.User,Partials.GuildMember] });
 const settings = new SettingsStore(process.env.CONFIG_PATH || "/data/config.json");
 const radio = new RadioService(client, process.env.RADIO_STREAM_URL || "https://stream.revma.ihrhls.com/zc185");
+const automod = new AutoModService(client, settings);
 const mainGuildId = process.env.MAIN_GUILD_ID || null;
 const staffGuildId = process.env.STAFF_GUILD_ID || null;
+const auditLogs = new AuditLogService(client,settings,staffGuildId);
 const teamMemberRoleId = process.env.TEAM_MEMBER_ROLE_ID || "1537632587260887150";
 const outgoing = [];
 let discordChannel;
@@ -222,9 +226,9 @@ client.once("clientReady", async () => {
     console.log("MPCS bot build: railway-radio-native-ffmpeg-v2");
     if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON()]);
     const publicCommands=[linkCommand.toJSON(),embedCommand.toJSON(),sayCommand.toJSON(),statsCommand.toJSON(),scheduleCommand.toJSON()];
-    if (mainGuildId) await (await client.guilds.fetch(mainGuildId)).commands.set([setRadioCommand.toJSON(),teamsCommand.toJSON(),ticketCommand.toJSON(),...publicCommands]);
-    if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON(),...publicCommands]);
-    if (!staffGuildId && !mainGuildId) await client.application.commands.set([setChatCommand.toJSON(),setRadioCommand.toJSON(),teamsCommand.toJSON(),ticketCommand.toJSON(),...publicCommands]);
+    if (mainGuildId) await (await client.guilds.fetch(mainGuildId)).commands.set([setRadioCommand.toJSON(),teamsCommand.toJSON(),ticketCommand.toJSON(),automodCommand.toJSON(),...publicCommands]);
+    if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON(),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
+    if (!staffGuildId && !mainGuildId) await client.application.commands.set([setChatCommand.toJSON(),setRadioCommand.toJSON(),teamsCommand.toJSON(),ticketCommand.toJSON(),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
     else await client.application.commands.set([]);
     const savedChannelId = await settings.load();
     const initialChannelId = savedChannelId || process.env.DISCORD_CHANNEL_ID;
@@ -243,6 +247,8 @@ client.once("clientReady", async () => {
 });
 
 client.on("interactionCreate", async (interaction) => {
+  if(interaction.isChatInputCommand()&&interaction.commandName==="logs")return void await auditLogs.command(interaction);
+  if(interaction.isChatInputCommand()&&interaction.commandName==="automod")return void await automod.command(interaction);
   if(interaction.isChatInputCommand()&&interaction.commandName==="ticket"){if(mainGuildId&&interaction.guildId!==mainGuildId)return void interaction.reply({content:"Tickets are only available in the main server.",flags:MessageFlags.Ephemeral});return void await handleTicketCommand(interaction,settings);}
   if((interaction.isButton()||interaction.isStringSelectMenu()||interaction.isChannelSelectMenu()||interaction.isRoleSelectMenu()||interaction.isModalSubmit())&&interaction.customId.startsWith("ticket:")){await handleTicketComponent(interaction,settings);return;}
   if(interaction.isChatInputCommand()&&interaction.commandName==="link"){
@@ -292,6 +298,17 @@ client.on("interactionCreate", async (interaction) => {
     await interaction.editReply(`Could not set the ${feature}: ${error.message}`);
   }
 });
+
+client.on("messageCreate", message => void automod.message(message).catch(error => console.error("AutoMod message handling failed:", error)));
+client.on("messageDelete",message=>void auditLogs.messageDelete(message).catch(error=>console.error("Message delete logging failed:",error)));
+client.on("messageUpdate",(before,after)=>void auditLogs.messageUpdate(before,after).catch(error=>console.error("Message edit logging failed:",error)));
+client.on("guildMemberAdd",member=>void auditLogs.memberAdd(member).catch(error=>console.error("Member join logging failed:",error)));
+client.on("guildMemberRemove",member=>void auditLogs.memberRemove(member).catch(error=>console.error("Member leave logging failed:",error)));
+client.on("guildMemberUpdate",(before,after)=>void auditLogs.memberUpdate(before,after).catch(error=>console.error("Member update logging failed:",error)));
+client.on("userUpdate",(before,after)=>void auditLogs.userUpdate(before,after).catch(error=>console.error("User update logging failed:",error)));
+client.on("guildBanAdd",ban=>void auditLogs.banAdd(ban).catch(error=>console.error("Ban logging failed:",error)));
+client.on("guildBanRemove",ban=>void auditLogs.banRemove(ban).catch(error=>console.error("Unban logging failed:",error)));
+client.on("voiceStateUpdate",(before,after)=>void auditLogs.voiceUpdate(before,after).catch(error=>console.error("Voice moderation logging failed:",error)));
 
 async function shutdown(signal) {
   console.log(`${signal} received; shutting down.`);

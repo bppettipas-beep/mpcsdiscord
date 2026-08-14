@@ -11,10 +11,14 @@ test("persists and reloads channels and ticket state", async () => {
   const writer = new SettingsStore(path);
   writer.ticketConfig.guild = { panelChannelId: "panel", categoryId: "category", supportRoleId: "support" };
   writer.tickets["guild:user"] = { channelId: "ticket", userId: "user", openedAt: "2026-08-14T00:00:00.000Z" };
+  writer.automod.guild = { enabled: true };
+  writer.auditLogs.guild = { text: "text", member: "member", mod: "mod" };
   await writer.saveChannel("123456789012345678");
   const reader = new SettingsStore(path);
   assert.equal(await reader.load(), "123456789012345678");
   assert.deepEqual(reader.ticketConfig.guild, { panelChannelId: "panel", categoryId: "category", supportRoleId: "support" });
   assert.deepEqual(reader.tickets["guild:user"], { channelId: "ticket", userId: "user", openedAt: "2026-08-14T00:00:00.000Z" });
-  assert.deepEqual(JSON.parse(await readFile(path, "utf8")), { channelId: "123456789012345678", radioChannelId: null, pending: {}, links: {}, teamSnapshot: { teams: [], players: [] }, teamActions: [], teamDrafts: {}, originalNicknames: {}, schedules: [], ticketConfig: { guild: { panelChannelId: "panel", categoryId: "category", supportRoleId: "support" } }, tickets: { "guild:user": { channelId: "ticket", userId: "user", openedAt: "2026-08-14T00:00:00.000Z" } } });
+  assert.deepEqual(reader.automod.guild, { enabled: true });
+  assert.deepEqual(reader.auditLogs.guild, { text: "text", member: "member", mod: "mod" });
+  assert.deepEqual(JSON.parse(await readFile(path, "utf8")), { channelId: "123456789012345678", radioChannelId: null, pending: {}, links: {}, teamSnapshot: { teams: [], players: [] }, teamActions: [], teamDrafts: {}, originalNicknames: {}, schedules: [], ticketConfig: { guild: { panelChannelId: "panel", categoryId: "category", supportRoleId: "support" } }, tickets: { "guild:user": { channelId: "ticket", userId: "user", openedAt: "2026-08-14T00:00:00.000Z" } }, automod: { guild: { enabled: true } }, auditLogs: { guild: { text: "text", member: "member", mod: "mod" } } });
 });
