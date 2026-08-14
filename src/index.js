@@ -104,6 +104,7 @@ const server = createServer((request, response) => {
       }
       if (request.url === "/link/start") {
         if (!/^\d{6}$/.test(value.code) || typeof value.uuid !== "string" || typeof value.player !== "string") return response.writeHead(400).end();
+        if (settings.links[value.uuid]) return response.writeHead(409).end();
         settings.pending[value.code] = { uuid: value.uuid, player: value.player, expires: Date.now() + 10 * 60_000 };
         settings.save().then(() => response.writeHead(202).end()).catch(() => response.writeHead(500).end()); return;
       }
