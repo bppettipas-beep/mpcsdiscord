@@ -18,6 +18,7 @@ const settings = new SettingsStore(process.env.CONFIG_PATH || "/data/config.json
 const radio = new RadioService(client, process.env.RADIO_STREAM_URL || "https://stream.revma.ihrhls.com/zc185");
 const mainGuildId = process.env.MAIN_GUILD_ID || null;
 const staffGuildId = process.env.STAFF_GUILD_ID || null;
+const teamMemberRoleId = process.env.TEAM_MEMBER_ROLE_ID || "1537632587260887150";
 const outgoing = [];
 let discordChannel;
 let flushing = false;
@@ -111,12 +112,13 @@ const server = createServer((request, response) => {
       }
       if (request.url === "/link/remove") {
         if (typeof value.uuid !== "string") return response.writeHead(400).end();
-        const linked = settings.links[value.uuid]; delete settings.links[value.uuid];
-        settings.save().then(() => { response.writeHead(linked ? 200 : 404, { "Content-Type": "application/json" }); response.end(JSON.stringify({ unlinked: Boolean(linked) })); }).catch(() => response.writeHead(500).end()); return;
+        const linked = settings.links[value.uuid];
+        if (!linked) { response.writeHead(404, { "Content-Type": "application/json" }); response.end(JSON.stringify({ unlinked: false })); return; }
+        void removeTeamDiscordState(value.uuid, linked).then(() => { delete settings.links[value.uuid]; return settings.save(); }).then(() => { response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify({ unlinked: true })); }).catch(error => { console.error("Unlink cleanup failed:", error); response.writeHead(500).end(); }); return;
       }
       if (request.url === "/teams/sync") {
         settings.teamSnapshot={teams:Array.isArray(value.teams)?value.teams:[],players:Array.isArray(value.players)?value.players:[]};const actions=settings.teamActions.splice(0,100);
-        settings.save().then(()=>{response.writeHead(200,{"Content-Type":"application/json"});response.end(JSON.stringify({actions}));}).catch(()=>response.writeHead(500).end());return;
+        void reconcileTeamMembers().then(()=>settings.save()).then(()=>{response.writeHead(200,{"Content-Type":"application/json"});response.end(JSON.stringify({actions,linkedUuids:Object.keys(settings.links)}));}).catch(error=>{console.error("Team Discord sync failed:",error);response.writeHead(500).end();});return;
       }
       void handleRankSync(value).then((result) => {
         response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(result));
@@ -146,6 +148,33 @@ async function handleRankSync(value) {
     }
   }
   return { updates };
+}
+
+async function removeTeamDiscordState(uuid, discordId) {
+  const guild = mainGuildId ? await client.guilds.fetch(mainGuildId) : null;
+  if (!guild) return;
+  let member; try { member = await guild.members.fetch(discordId); } catch { return; }
+  if (member.roles.cache.has(teamMemberRoleId)) await member.roles.remove(teamMemberRoleId, "MPCS team membership ended");
+  if (uuid in settings.originalNicknames) await member.setNickname(settings.originalNicknames[uuid], "MPCS team membership ended");
+  delete settings.originalNicknames[uuid];
+}
+
+async function reconcileTeamMembers() {
+  const guild = mainGuildId ? await client.guilds.fetch(mainGuildId) : null; if (!guild) return;
+  const assigned = new Map(); for (const team of settings.teamSnapshot.teams || []) for (const uuid of team.members || []) assigned.set(uuid, team);
+  for (const [uuid, discordId] of Object.entries(settings.links)) {
+    let member; try { member = await guild.members.fetch(discordId); } catch { continue; }
+    const team = assigned.get(uuid), player = (settings.teamSnapshot.players || []).find(entry => entry.uuid === uuid);
+    try {
+      if (team) {
+        if (!(uuid in settings.originalNicknames)) settings.originalNicknames[uuid] = member.nickname ?? null;
+        if (!member.roles.cache.has(teamMemberRoleId)) await member.roles.add(teamMemberRoleId, "MPCS team membership");
+        const minecraftName = player?.name || "Minecraft", teamPart = team.name.toUpperCase().slice(0, Math.max(1, 32 - minecraftName.length - 3));
+        const nickname = `${teamPart} | ${minecraftName}`;
+        if (member.nickname !== nickname) await member.setNickname(nickname, "MPCS team membership");
+      } else if (uuid in settings.originalNicknames) await removeTeamDiscordState(uuid, discordId);
+    } catch (error) { console.error(`Could not synchronize team role/nickname for ${uuid}:`, error); }
+  }
 }
 
 client.on("messageCreate", async (message) => {

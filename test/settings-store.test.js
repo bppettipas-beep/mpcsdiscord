@@ -12,5 +12,5 @@ test("persists and reloads the selected channel", async () => {
   await writer.saveChannel("123456789012345678");
   const reader = new SettingsStore(path);
   assert.equal(await reader.load(), "123456789012345678");
-  assert.deepEqual(JSON.parse(await readFile(path, "utf8")), { channelId: "123456789012345678", radioChannelId: null, pending: {}, links: {}, teamSnapshot: { teams: [], players: [] }, teamActions: [], teamDrafts: {} });
+  assert.deepEqual(JSON.parse(await readFile(path, "utf8")), { channelId: "123456789012345678", radioChannelId: null, pending: {}, links: {}, teamSnapshot: { teams: [], players: [] }, teamActions: [], teamDrafts: {}, originalNicknames: {} });
 });
