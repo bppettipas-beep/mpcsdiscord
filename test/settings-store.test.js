@@ -5,12 +5,16 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { SettingsStore } from "../src/settings-store.js";
 
-test("persists and reloads the selected channel", async () => {
+test("persists and reloads channels and ticket state", async () => {
   const directory = await mkdtemp(join(tmpdir(), "mpcs-discord-"));
   const path = join(directory, "config.json");
   const writer = new SettingsStore(path);
+  writer.ticketConfig.guild = { panelChannelId: "panel", categoryId: "category", supportRoleId: "support" };
+  writer.tickets["guild:user"] = { channelId: "ticket", userId: "user", openedAt: "2026-08-14T00:00:00.000Z" };
   await writer.saveChannel("123456789012345678");
   const reader = new SettingsStore(path);
   assert.equal(await reader.load(), "123456789012345678");
-  assert.deepEqual(JSON.parse(await readFile(path, "utf8")), { channelId: "123456789012345678", radioChannelId: null, pending: {}, links: {}, teamSnapshot: { teams: [], players: [] }, teamActions: [], teamDrafts: {}, originalNicknames: {}, schedules: [] });
+  assert.deepEqual(reader.ticketConfig.guild, { panelChannelId: "panel", categoryId: "category", supportRoleId: "support" });
+  assert.deepEqual(reader.tickets["guild:user"], { channelId: "ticket", userId: "user", openedAt: "2026-08-14T00:00:00.000Z" });
+  assert.deepEqual(JSON.parse(await readFile(path, "utf8")), { channelId: "123456789012345678", radioChannelId: null, pending: {}, links: {}, teamSnapshot: { teams: [], players: [] }, teamActions: [], teamDrafts: {}, originalNicknames: {}, schedules: [], ticketConfig: { guild: { panelChannelId: "panel", categoryId: "category", supportRoleId: "support" } }, tickets: { "guild:user": { channelId: "ticket", userId: "user", openedAt: "2026-08-14T00:00:00.000Z" } } });
 });

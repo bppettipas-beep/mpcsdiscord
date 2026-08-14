@@ -13,6 +13,8 @@ export class SettingsStore {
     this.teamDrafts = {};
     this.originalNicknames = {};
     this.schedules = [];
+    this.ticketConfig = {};
+    this.tickets = {};
   }
 
   async load() {
@@ -27,6 +29,8 @@ export class SettingsStore {
       this.teamDrafts = value.teamDrafts && typeof value.teamDrafts === "object" ? value.teamDrafts : {};
       this.originalNicknames = value.originalNicknames && typeof value.originalNicknames === "object" ? value.originalNicknames : {};
       this.schedules = Array.isArray(value.schedules) ? value.schedules : [];
+      this.ticketConfig = value.ticketConfig && typeof value.ticketConfig === "object" ? value.ticketConfig : {};
+      this.tickets = value.tickets && typeof value.tickets === "object" ? value.tickets : {};
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
@@ -41,7 +45,7 @@ export class SettingsStore {
   async save() {
     await mkdir(dirname(this.filePath), { recursive: true });
     const temporary = `${this.filePath}.tmp`;
-    await writeFile(temporary, JSON.stringify({ channelId: this.channelId, radioChannelId: this.radioChannelId, pending: this.pending, links: this.links, teamSnapshot: this.teamSnapshot, teamActions: this.teamActions, teamDrafts: this.teamDrafts, originalNicknames: this.originalNicknames, schedules: this.schedules }, null, 2), "utf8");
+    await writeFile(temporary, JSON.stringify({ channelId: this.channelId, radioChannelId: this.radioChannelId, pending: this.pending, links: this.links, teamSnapshot: this.teamSnapshot, teamActions: this.teamActions, teamDrafts: this.teamDrafts, originalNicknames: this.originalNicknames, schedules: this.schedules, ticketConfig: this.ticketConfig, tickets: this.tickets }, null, 2), "utf8");
     await rename(temporary, this.filePath);
   }
 }
