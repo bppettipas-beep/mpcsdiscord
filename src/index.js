@@ -75,6 +75,17 @@ async function flushOutgoing() {
 }
 
 const server = createServer((request, response) => {
+  if (request.method === "OPTIONS" && request.url === "/api/schedule") {
+    response.writeHead(204, { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, OPTIONS" }).end();
+    return;
+  }
+  if (request.method === "GET" && request.url === "/api/schedule") {
+    const teamNames = new Map((settings.teamSnapshot.teams || []).map(team => [team.id, team.name]));
+    const matches = settings.schedules.map(match => ({ ...match, teamOneName: match.teamOneName || teamNames.get(match.teamOne) || null, teamTwoName: match.teamTwoName || teamNames.get(match.teamTwo) || null }));
+    response.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "public, max-age=30", "Access-Control-Allow-Origin": "*" });
+    response.end(JSON.stringify({ matches, updatedAt: new Date().toISOString() }));
+    return;
+  }
   if (request.method === "GET" && request.url === "/health") {
     response.writeHead(discordChannel ? 200 : 503, { "Content-Type": "application/json" });
     response.end(JSON.stringify({ ok: Boolean(discordChannel) }));
