@@ -26,6 +26,8 @@ The selected channel is stored in `/data/config.json`, so it survives deployment
 
 `/setchat` is registered only in `STAFF_GUILD_ID`. Radio and future public panels are registered in `MAIN_GUILD_ID`. Rank synchronization uses roles from the main server. Invite the same bot to both servers.
 
+Run `/teams` in the main server with **Manage Server** permission to open the private Minecraft team manager. It supports create, edit colors/name, linked-member selection (up to 8), and deletion. Minecraft and Discord synchronize about every 10 seconds.
+
 ## Minecraft configuration
 
 After installing the newly built MPCSCore JAR once, edit `plugins/MPCSCore/discord.yml`:

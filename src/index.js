@@ -4,6 +4,7 @@ import { Client, GatewayIntentBits, ActivityType, escapeMarkdown, PermissionFlag
 import { secretsMatch, validateChatPayload } from "./bridge-utils.js";
 import { SettingsStore } from "./settings-store.js";
 import { RadioService } from "./radio-service.js";
+import { teamsCommand, panel as teamsPanel, handleTeams } from "./teams-ui.js";
 
 const required = ["DISCORD_TOKEN", "BRIDGE_SECRET"];
 const missing = required.filter((name) => !process.env[name]);
@@ -77,7 +78,7 @@ const server = createServer((request, response) => {
     response.end(JSON.stringify({ ok: Boolean(discordChannel) }));
     return;
   }
-  if (request.method !== "POST" || !["/minecraft-chat", "/link/start", "/link/remove", "/rank-sync"].includes(request.url)) {
+  if (request.method !== "POST" || !["/minecraft-chat", "/link/start", "/link/remove", "/rank-sync", "/teams/sync"].includes(request.url)) {
     response.writeHead(404).end();
     return;
   }
@@ -91,7 +92,7 @@ const server = createServer((request, response) => {
   request.setEncoding("utf8");
   request.on("data", (chunk) => {
     body += chunk;
-    if (body.length > 4096) request.destroy();
+    if (body.length > 131072) request.destroy();
   });
   request.on("end", () => {
     try {
@@ -112,6 +113,10 @@ const server = createServer((request, response) => {
         if (typeof value.uuid !== "string") return response.writeHead(400).end();
         const linked = settings.links[value.uuid]; delete settings.links[value.uuid];
         settings.save().then(() => { response.writeHead(linked ? 200 : 404, { "Content-Type": "application/json" }); response.end(JSON.stringify({ unlinked: Boolean(linked) })); }).catch(() => response.writeHead(500).end()); return;
+      }
+      if (request.url === "/teams/sync") {
+        settings.teamSnapshot={teams:Array.isArray(value.teams)?value.teams:[],players:Array.isArray(value.players)?value.players:[]};const actions=settings.teamActions.splice(0,100);
+        settings.save().then(()=>{response.writeHead(200,{"Content-Type":"application/json"});response.end(JSON.stringify({actions}));}).catch(()=>response.writeHead(500).end());return;
       }
       void handleRankSync(value).then((result) => {
         response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(result));
@@ -161,8 +166,8 @@ client.once("clientReady", async () => {
   try {
     console.log("MPCS bot build: railway-radio-native-ffmpeg-v2");
     if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON()]);
-    if (mainGuildId) await (await client.guilds.fetch(mainGuildId)).commands.set([setRadioCommand.toJSON()]);
-    if (!staffGuildId && !mainGuildId) await client.application.commands.set([setChatCommand.toJSON(), setRadioCommand.toJSON()]);
+    if (mainGuildId) await (await client.guilds.fetch(mainGuildId)).commands.set([setRadioCommand.toJSON(),teamsCommand.toJSON()]);
+    if (!staffGuildId && !mainGuildId) await client.application.commands.set([setChatCommand.toJSON(), setRadioCommand.toJSON(),teamsCommand.toJSON()]);
     else await client.application.commands.set([]);
     const savedChannelId = await settings.load();
     const initialChannelId = savedChannelId || process.env.DISCORD_CHANNEL_ID;
@@ -181,6 +186,8 @@ client.once("clientReady", async () => {
 });
 
 client.on("interactionCreate", async (interaction) => {
+  if(interaction.isChatInputCommand()&&interaction.commandName==="teams"){if(mainGuildId&&interaction.guildId!==mainGuildId)return void interaction.reply({content:"This command is only available in the main server.",flags:MessageFlags.Ephemeral});return void interaction.reply({...teamsPanel(settings),flags:MessageFlags.Ephemeral});}
+  if((interaction.isButton()||interaction.isStringSelectMenu()||interaction.isUserSelectMenu()||interaction.isModalSubmit())&&interaction.customId.startsWith("teams:")){await handleTeams(interaction,settings);return;}
   if (!interaction.isChatInputCommand() || !["setchat", "setradio"].includes(interaction.commandName)) return;
   if (!interaction.inGuild() || !interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
     await interaction.reply({ content: "You need Manage Server permission to use this command.", flags: MessageFlags.Ephemeral });
