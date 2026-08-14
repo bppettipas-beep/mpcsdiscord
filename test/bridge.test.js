@@ -10,8 +10,14 @@ test("compares bridge secrets", () => {
 
 test("validates an accepted Minecraft chat payload", () => {
   assert.deepEqual(validateChatPayload({ player: "GooseWithAK", message: "hello", server: "MPCS" }), {
-    player: "GooseWithAK", message: "hello", server: "MPCS"
+    player: "GooseWithAK", message: "hello", server: "MPCS", type: "chat"
   });
+});
+
+test("validates Minecraft join and leave events", () => {
+  assert.deepEqual(validateChatPayload({ player: "GooseWithAK", message: "+", type: "join" }), { player: "GooseWithAK", message: "+", server: "MPCS", type: "join" });
+  assert.deepEqual(validateChatPayload({ player: "GooseWithAK", message: "-", type: "leave" }), { player: "GooseWithAK", message: "-", server: "MPCS", type: "leave" });
+  assert.equal(validateChatPayload({ player: "GooseWithAK", message: "?", type: "unknown" }), null);
 });
 
 test("rejects missing and oversized payload fields", () => {

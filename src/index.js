@@ -58,8 +58,9 @@ async function selectDiscordChannel(channelId) {
   return channel;
 }
 
-function queueDiscordLine({ player, message }) {
-  outgoing.push(`**${escapeMarkdown(player)}**: ${escapeMarkdown(message)}`);
+function queueDiscordLine({ player, message, type }) {
+  const name = escapeMarkdown(player);
+  outgoing.push(type === "join" ? `**${name}** [🟢 +]` : type === "leave" ? `**${name}** [🔴 −]` : `**${name}**: ${escapeMarkdown(message)}`);
   if (outgoing.length > 1000) outgoing.shift();
 }
 

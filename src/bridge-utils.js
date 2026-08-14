@@ -11,6 +11,7 @@ export function validateChatPayload(value) {
   const player = typeof value.player === "string" ? value.player.trim() : "";
   const message = typeof value.message === "string" ? value.message.trim() : "";
   const server = typeof value.server === "string" ? value.server.trim() : "MPCS";
-  if (!player || player.length > 32 || !message || message.length > 512 || server.length > 64) return null;
-  return { player, message, server: server || "MPCS" };
+  const type = typeof value.type === "string" ? value.type.trim().toLowerCase() : "chat";
+  if (!player || player.length > 32 || !message || message.length > 512 || server.length > 64 || !["chat", "join", "leave"].includes(type)) return null;
+  return { player, message, server: server || "MPCS", type };
 }
