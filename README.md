@@ -37,6 +37,10 @@ Restart Minecraft after editing it. Existing MPCS configuration files are preser
 
 The Railway health endpoint is `/health`. It returns HTTP 200 after the bot has connected to Discord.
 
+## 91.9 The Bend radio
+
+Run `/setradio channel-id:VOICE_CHANNEL_ID` with **Manage Server** permission. The bot joins that voice channel and continuously plays 91.9 The Bend from Moncton. Run `/setradio channel-id:off` to disconnect it. The bot needs **View Channel**, **Connect**, and **Speak** permissions.
+
 ## Account linking and rank synchronization
 
 Enable **Server Members Intent** and **Message Content Intent** on the bot page in the Discord Developer Portal. In Minecraft, run `/link`, then DM the six-digit code to the bot.

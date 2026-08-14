@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import { Client, GatewayIntentBits, ActivityType, escapeMarkdown, PermissionFlagsBits, SlashCommandBuilder, Partials, MessageFlags } from "discord.js";
 import { secretsMatch, validateChatPayload } from "./bridge-utils.js";
 import { SettingsStore } from "./settings-store.js";
+import { RadioService } from "./radio-service.js";
 
 const required = ["DISCORD_TOKEN", "BRIDGE_SECRET"];
 const missing = required.filter((name) => !process.env[name]);
@@ -11,8 +12,9 @@ if (missing.length) {
   process.exit(1);
 }
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.DirectMessages, GatewayIntentBits.MessageContent], partials: [Partials.Channel] });
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.DirectMessages, GatewayIntentBits.MessageContent], partials: [Partials.Channel] });
 const settings = new SettingsStore(process.env.CONFIG_PATH || "/data/config.json");
+const radio = new RadioService(client, process.env.RADIO_STREAM_URL || "https://ais-sa1.streamon.fm/7232_128k.aac/playlist.m3u8");
 const outgoing = [];
 let discordChannel;
 let flushing = false;
@@ -25,6 +27,7 @@ const setChatCommand = new SlashCommandBuilder()
     .setName("channel-id")
     .setDescription("The Discord channel ID")
     .setRequired(true));
+const setRadioCommand = new SlashCommandBuilder().setName("setradio").setDescription("Play 91.9 The Bend in a voice channel").setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).addStringOption((option) => option.setName("channel-id").setDescription("Voice channel ID, or off to disconnect").setRequired(true));
 
 async function selectDiscordChannel(channelId) {
   const channel = await client.channels.fetch(channelId);
@@ -147,10 +150,11 @@ setInterval(() => void flushOutgoing(), 500);
 
 client.once("ready", async () => {
   try {
-    await client.application.commands.set([setChatCommand.toJSON()]);
+    await client.application.commands.set([setChatCommand.toJSON(), setRadioCommand.toJSON()]);
     const savedChannelId = await settings.load();
     const initialChannelId = savedChannelId || process.env.DISCORD_CHANNEL_ID;
     if (initialChannelId) await selectDiscordChannel(initialChannelId);
+    if (settings.radioChannelId) { const voice = await client.channels.fetch(settings.radioChannelId); if (voice?.isVoiceBased()) await radio.connect(voice); }
     client.user.setPresence({
       activities: [{ name: "MPCS", state: "Watching over MPCS", type: ActivityType.Custom }],
       status: "online"
@@ -164,7 +168,7 @@ client.once("ready", async () => {
 });
 
 client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isChatInputCommand() || interaction.commandName !== "setchat") return;
+  if (!interaction.isChatInputCommand() || !["setchat", "setradio"].includes(interaction.commandName)) return;
   if (!interaction.inGuild() || !interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
     await interaction.reply({ content: "You need Manage Server permission to use this command.", flags: MessageFlags.Ephemeral });
     return;
@@ -172,6 +176,13 @@ client.on("interactionCreate", async (interaction) => {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   try {
     const raw = interaction.options.getString("channel-id", true).trim();
+    if (interaction.commandName === "setradio") {
+      if (raw.toLowerCase() === "off") { radio.stop(); settings.radioChannelId=null; await settings.save(); await interaction.editReply("Radio disconnected."); return; }
+      const voiceId=raw.replace(/^<#(\d+)>$/,"$1"); if(!/^\d{17,20}$/.test(voiceId))throw new Error("Enter a valid voice channel ID.");
+      const voice=await client.channels.fetch(voiceId);if(!voice?.isVoiceBased()||voice.guildId!==interaction.guildId)throw new Error("That is not a voice channel in this server.");
+      if(!voice.permissionsFor(client.user)?.has([PermissionFlagsBits.ViewChannel,PermissionFlagsBits.Connect,PermissionFlagsBits.Speak]))throw new Error("The bot needs View Channel, Connect, and Speak there.");
+      await radio.connect(voice);settings.radioChannelId=voice.id;await settings.save();await interaction.editReply(`Now playing **91.9 The Bend** in <#${voice.id}>.`);return;
+    }
     const channelId = raw.replace(/^<#(\d+)>$/, "$1");
     if (!/^\d{17,20}$/.test(channelId)) throw new Error("Enter a valid Discord channel ID.");
     const channel = await selectDiscordChannel(channelId);
@@ -186,6 +197,7 @@ client.on("interactionCreate", async (interaction) => {
 async function shutdown(signal) {
   console.log(`${signal} received; shutting down.`);
   server.close();
+  radio.stop();
   await flushOutgoing();
   client.destroy();
   process.exit(0);
