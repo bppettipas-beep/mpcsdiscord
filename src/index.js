@@ -191,7 +191,8 @@ client.on("interactionCreate", async (interaction) => {
     await settings.saveChannel(channel.id);
     await interaction.editReply(`Minecraft chat will now be sent to <#${channel.id}>.`);
   } catch (error) {
-    await interaction.editReply(`Could not set the chat channel: ${error.message}`);
+    const feature = interaction.commandName === "setradio" ? "radio channel" : "chat channel";
+    await interaction.editReply(`Could not set the ${feature}: ${error.message}`);
   }
 });
 

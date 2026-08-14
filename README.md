@@ -41,7 +41,7 @@ The Railway health endpoint is `/health`. It returns HTTP 200 after the bot has 
 
 Run `/setradio channel-id:VOICE_CHANNEL_ID` with **Manage Server** permission. The bot joins that voice channel and continuously plays 91.9 The Bend from Moncton. Run `/setradio channel-id:off` to disconnect it. The bot needs **View Channel**, **Connect**, and **Speak** permissions.
 
-Railway installs native Linux FFmpeg from `nixpacks.toml`; do not override the service builder with Dockerfile or Railpack unless FFmpeg is also installed.
+Railway builds the included `Dockerfile`, which installs native Linux FFmpeg automatically.
 
 ## Account linking and rank synchronization
 
