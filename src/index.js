@@ -138,7 +138,17 @@ const server = createServer((request, response) => {
         if (typeof value.uuid !== "string") return response.writeHead(400).end();
         const linked = settings.links[value.uuid];
         if (!linked) { response.writeHead(404, { "Content-Type": "application/json" }); response.end(JSON.stringify({ unlinked: false })); return; }
-        void removeTeamDiscordState(value.uuid, linked).then(() => { delete settings.links[value.uuid]; return settings.save(); }).then(() => { response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify({ unlinked: true })); }).catch(error => { console.error("Unlink cleanup failed:", error); response.writeHead(500).end(); }); return;
+        delete settings.links[value.uuid];
+        void settings.save().then(() => {
+          response.writeHead(200, { "Content-Type": "application/json" });
+          response.end(JSON.stringify({ unlinked: true }));
+          void removeTeamDiscordState(value.uuid, linked).catch(error => console.error("Post-unlink Discord cleanup failed:", error));
+        }).catch(error => {
+          settings.links[value.uuid] = linked;
+          console.error("Could not persist account unlink:", error);
+          if (!response.headersSent) response.writeHead(500).end();
+        });
+        return;
       }
       if (request.url === "/teams/sync") {
         settings.teamSnapshot={teams:Array.isArray(value.teams)?value.teams:[],players:Array.isArray(value.players)?value.players:[]};const actions=settings.teamActions.splice(0,100);
