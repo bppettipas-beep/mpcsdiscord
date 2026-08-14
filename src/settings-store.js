@@ -5,12 +5,16 @@ export class SettingsStore {
   constructor(filePath) {
     this.filePath = filePath;
     this.channelId = null;
+    this.pending = {};
+    this.links = {};
   }
 
   async load() {
     try {
       const value = JSON.parse(await readFile(this.filePath, "utf8"));
       this.channelId = typeof value.channelId === "string" ? value.channelId : null;
+      this.pending = value.pending && typeof value.pending === "object" ? value.pending : {};
+      this.links = value.links && typeof value.links === "object" ? value.links : {};
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
@@ -18,10 +22,14 @@ export class SettingsStore {
   }
 
   async saveChannel(channelId) {
+    this.channelId = channelId;
+    await this.save();
+  }
+
+  async save() {
     await mkdir(dirname(this.filePath), { recursive: true });
     const temporary = `${this.filePath}.tmp`;
-    await writeFile(temporary, JSON.stringify({ channelId }, null, 2), "utf8");
+    await writeFile(temporary, JSON.stringify({ channelId: this.channelId, pending: this.pending, links: this.links }, null, 2), "utf8");
     await rename(temporary, this.filePath);
-    this.channelId = channelId;
   }
 }

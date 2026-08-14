@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { createServer } from "node:http";
-import { Client, GatewayIntentBits, ActivityType, escapeMarkdown, PermissionFlagsBits, SlashCommandBuilder } from "discord.js";
+import { Client, GatewayIntentBits, ActivityType, escapeMarkdown, PermissionFlagsBits, SlashCommandBuilder, Partials, MessageFlags } from "discord.js";
 import { secretsMatch, validateChatPayload } from "./bridge-utils.js";
 import { SettingsStore } from "./settings-store.js";
 
@@ -11,7 +11,7 @@ if (missing.length) {
   process.exit(1);
 }
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.DirectMessages, GatewayIntentBits.MessageContent], partials: [Partials.Channel] });
 const settings = new SettingsStore(process.env.CONFIG_PATH || "/data/config.json");
 const outgoing = [];
 let discordChannel;
@@ -72,7 +72,7 @@ const server = createServer((request, response) => {
     response.end(JSON.stringify({ ok: Boolean(discordChannel) }));
     return;
   }
-  if (request.method !== "POST" || request.url !== "/minecraft-chat") {
+  if (request.method !== "POST" || !["/minecraft-chat", "/link/start", "/rank-sync"].includes(request.url)) {
     response.writeHead(404).end();
     return;
   }
@@ -90,15 +90,55 @@ const server = createServer((request, response) => {
   });
   request.on("end", () => {
     try {
-      const payload = validateChatPayload(JSON.parse(body));
-      if (!payload) return response.writeHead(400).end();
-      if (!discordChannel) return response.writeHead(503).end();
-      queueDiscordLine(payload);
-      response.writeHead(202).end();
+      const value = JSON.parse(body);
+      if (request.url === "/minecraft-chat") {
+        const payload = validateChatPayload(value);
+        if (!payload) return response.writeHead(400).end();
+        if (!discordChannel) return response.writeHead(503).end();
+        queueDiscordLine(payload); return response.writeHead(202).end();
+      }
+      if (request.url === "/link/start") {
+        if (!/^\d{6}$/.test(value.code) || typeof value.uuid !== "string" || typeof value.player !== "string") return response.writeHead(400).end();
+        settings.pending[value.code] = { uuid: value.uuid, player: value.player, expires: Date.now() + 10 * 60_000 };
+        settings.save().then(() => response.writeHead(202).end()).catch(() => response.writeHead(500).end()); return;
+      }
+      void handleRankSync(value).then((result) => {
+        response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(result));
+      }).catch((error) => { console.error("Rank sync failed:", error); response.writeHead(500).end(); });
     } catch {
       response.writeHead(400).end();
     }
   });
+});
+
+async function handleRankSync(value) {
+  if (!discordChannel?.guild || !Array.isArray(value.players) || !Array.isArray(value.mappings)) return { updates: [] };
+  const direction = String(value.direction || "BOTH").toUpperCase();
+  const mappings = value.mappings.filter((m) => m.rank && /^\d{17,20}$/.test(m.roleId)).sort((a,b) => Number(b.weight)-Number(a.weight));
+  const updates = [];
+  for (const player of value.players) {
+    const discordId = settings.links[player.uuid]; if (!discordId) continue;
+    let member; try { member = await discordChannel.guild.members.fetch(discordId); } catch { continue; }
+    const discordMapping = mappings.find((m) => member.roles.cache.has(m.roleId));
+    if ((direction === "DISCORD_TO_MINECRAFT" || direction === "BOTH") && discordMapping) {
+      if (discordMapping.rank !== player.rank) updates.push({ uuid: player.uuid, rank: discordMapping.rank });
+    } else if (direction === "MINECRAFT_TO_DISCORD" || direction === "BOTH") {
+      const target = mappings.find((m) => m.rank === player.rank);
+      for (const mapping of mappings) if (mapping.roleId !== target?.roleId && member.roles.cache.has(mapping.roleId)) await member.roles.remove(mapping.roleId);
+      if (target && !member.roles.cache.has(target.roleId)) await member.roles.add(target.roleId);
+    }
+  }
+  return { updates };
+}
+
+client.on("messageCreate", async (message) => {
+  if (message.author.bot || message.guild) return;
+  const code = message.content.trim();
+  const pending = settings.pending[code];
+  if (!pending || pending.expires < Date.now()) { if (pending) { delete settings.pending[code]; await settings.save(); } await message.reply("That link code is invalid or expired. Run /link in Minecraft again."); return; }
+  for (const [uuid, discordId] of Object.entries(settings.links)) if (discordId === message.author.id) delete settings.links[uuid];
+  settings.links[pending.uuid] = message.author.id; delete settings.pending[code]; await settings.save();
+  await message.reply(`Linked your Discord account to Minecraft player **${pending.player}**.`);
 });
 
 const port = Number(process.env.PORT) || 3000;
@@ -126,10 +166,10 @@ client.once("ready", async () => {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand() || interaction.commandName !== "setchat") return;
   if (!interaction.inGuild() || !interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
-    await interaction.reply({ content: "You need Manage Server permission to use this command.", ephemeral: true });
+    await interaction.reply({ content: "You need Manage Server permission to use this command.", flags: MessageFlags.Ephemeral });
     return;
   }
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   try {
     const raw = interaction.options.getString("channel-id", true).trim();
     const channelId = raw.replace(/^<#(\d+)>$/, "$1");
