@@ -15,6 +15,8 @@ if (missing.length) {
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.DirectMessages, GatewayIntentBits.MessageContent], partials: [Partials.Channel] });
 const settings = new SettingsStore(process.env.CONFIG_PATH || "/data/config.json");
 const radio = new RadioService(client, process.env.RADIO_STREAM_URL || "https://stream.revma.ihrhls.com/zc185");
+const mainGuildId = process.env.MAIN_GUILD_ID || null;
+const staffGuildId = process.env.STAFF_GUILD_ID || null;
 const outgoing = [];
 let discordChannel;
 let flushing = false;
@@ -75,7 +77,7 @@ const server = createServer((request, response) => {
     response.end(JSON.stringify({ ok: Boolean(discordChannel) }));
     return;
   }
-  if (request.method !== "POST" || !["/minecraft-chat", "/link/start", "/rank-sync"].includes(request.url)) {
+  if (request.method !== "POST" || !["/minecraft-chat", "/link/start", "/link/remove", "/rank-sync"].includes(request.url)) {
     response.writeHead(404).end();
     return;
   }
@@ -105,6 +107,11 @@ const server = createServer((request, response) => {
         settings.pending[value.code] = { uuid: value.uuid, player: value.player, expires: Date.now() + 10 * 60_000 };
         settings.save().then(() => response.writeHead(202).end()).catch(() => response.writeHead(500).end()); return;
       }
+      if (request.url === "/link/remove") {
+        if (typeof value.uuid !== "string") return response.writeHead(400).end();
+        const linked = settings.links[value.uuid]; delete settings.links[value.uuid];
+        settings.save().then(() => { response.writeHead(linked ? 200 : 404, { "Content-Type": "application/json" }); response.end(JSON.stringify({ unlinked: Boolean(linked) })); }).catch(() => response.writeHead(500).end()); return;
+      }
       void handleRankSync(value).then((result) => {
         response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(result));
       }).catch((error) => { console.error("Rank sync failed:", error); response.writeHead(500).end(); });
@@ -115,13 +122,14 @@ const server = createServer((request, response) => {
 });
 
 async function handleRankSync(value) {
-  if (!discordChannel?.guild || !Array.isArray(value.players) || !Array.isArray(value.mappings)) return { updates: [] };
+  const guild = mainGuildId ? await client.guilds.fetch(mainGuildId) : discordChannel?.guild;
+  if (!guild || !Array.isArray(value.players) || !Array.isArray(value.mappings)) return { updates: [] };
   const direction = String(value.direction || "BOTH").toUpperCase();
   const mappings = value.mappings.filter((m) => m.rank && /^\d{17,20}$/.test(m.roleId)).sort((a,b) => Number(b.weight)-Number(a.weight));
   const updates = [];
   for (const player of value.players) {
     const discordId = settings.links[player.uuid]; if (!discordId) continue;
-    let member; try { member = await discordChannel.guild.members.fetch(discordId); } catch { continue; }
+    let member; try { member = await guild.members.fetch(discordId); } catch { continue; }
     const discordMapping = mappings.find((m) => member.roles.cache.has(m.roleId));
     if ((direction === "DISCORD_TO_MINECRAFT" || direction === "BOTH") && discordMapping) {
       if (discordMapping.rank !== player.rank) updates.push({ uuid: player.uuid, rank: discordMapping.rank });
@@ -151,7 +159,10 @@ setInterval(() => void flushOutgoing(), 500);
 client.once("clientReady", async () => {
   try {
     console.log("MPCS bot build: railway-radio-native-ffmpeg-v2");
-    await client.application.commands.set([setChatCommand.toJSON(), setRadioCommand.toJSON()]);
+    if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON()]);
+    if (mainGuildId) await (await client.guilds.fetch(mainGuildId)).commands.set([setRadioCommand.toJSON()]);
+    if (!staffGuildId && !mainGuildId) await client.application.commands.set([setChatCommand.toJSON(), setRadioCommand.toJSON()]);
+    else await client.application.commands.set([]);
     const savedChannelId = await settings.load();
     const initialChannelId = savedChannelId || process.env.DISCORD_CHANNEL_ID;
     if (initialChannelId) await selectDiscordChannel(initialChannelId);
@@ -174,6 +185,8 @@ client.on("interactionCreate", async (interaction) => {
     await interaction.reply({ content: "You need Manage Server permission to use this command.", flags: MessageFlags.Ephemeral });
     return;
   }
+  if (interaction.commandName === "setchat" && staffGuildId && interaction.guildId !== staffGuildId) { await interaction.reply({ content: "This command is only available in the staff server.", flags: MessageFlags.Ephemeral }); return; }
+  if (interaction.commandName === "setradio" && mainGuildId && interaction.guildId !== mainGuildId) { await interaction.reply({ content: "This command is only available in the main server.", flags: MessageFlags.Ephemeral }); return; }
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   try {
     const raw = interaction.options.getString("channel-id", true).trim();

@@ -10,6 +10,8 @@ Set these variables on the Railway service:
 DISCORD_TOKEN=your_discord_bot_token
 BRIDGE_SECRET=a_long_random_secret
 CONFIG_PATH=/data/config.json
+MAIN_GUILD_ID=your_main_discord_server_id
+STAFF_GUILD_ID=your_staff_discord_server_id
 ```
 
 Railway supplies `PORT` automatically. The start command is `npm start`. Generate a public Railway domain, then use its HTTPS URL in the plugin's `discord.yml`.
@@ -21,6 +23,8 @@ Add a Railway volume mounted at `/data`, then use this Discord command from an a
 ```
 
 The selected channel is stored in `/data/config.json`, so it survives deployments and restarts. `DISCORD_CHANNEL_ID` remains available as an optional initial fallback.
+
+`/setchat` is registered only in `STAFF_GUILD_ID`. Radio and future public panels are registered in `MAIN_GUILD_ID`. Rank synchronization uses roles from the main server. Invite the same bot to both servers.
 
 ## Minecraft configuration
 
