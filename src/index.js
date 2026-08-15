@@ -102,8 +102,9 @@ const server = createServer((request, response) => {
   if (request.method === "GET" && request.url === "/api/schedule") {
     const teamNames = new Map((settings.teamSnapshot.teams || []).map(team => [team.id, team.name]));
     const matches = settings.schedules.map(match => ({ ...match, teamOneName: match.teamOneName || teamNames.get(match.teamOne) || null, teamTwoName: match.teamTwoName || teamNames.get(match.teamTwo) || null }));
-    const playerNames = new Map((settings.teamSnapshot.players || []).map(player => [player.uuid, player.name]));
-    const teams = (settings.teamSnapshot.teams || []).map(team => ({ id: team.id, name: team.name || null, tag: team.tag || null, type: team.type || null, players: (team.members || []).map(uuid => ({ uuid, name: playerNames.get(uuid) || null })) }));
+    const uuidPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const playerNames = new Map((settings.teamSnapshot.players || []).map(player => [player.uuid,typeof player.name==="string"&&!uuidPattern.test(player.name)?player.name:null]));
+    const teams = (settings.teamSnapshot.teams || []).map(team => ({ id: team.id, name: team.name || null, tag: team.tag || null, type: team.type || null, players: (team.members || []).map(member => {const uuid=typeof member==="string"?member:member?.uuid;const supplied=typeof member==="object"&&typeof member?.name==="string"&&!uuidPattern.test(member.name)?member.name:null;return{uuid,name:supplied||playerNames.get(uuid)||null};}) }));
     response.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache", "Expires": "0", "Access-Control-Allow-Origin": "*" });
     response.end(JSON.stringify({ matches, teams, modes: ["Crystal", "Sword", "Ultra Hardcore", "Cart", "Spear Mace", "Pot", "Diamond SMP"], updatedAt: new Date().toISOString() }));
     return;
