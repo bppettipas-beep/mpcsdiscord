@@ -39,6 +39,10 @@ const setChatCommand = new SlashCommandBuilder()
     .setDescription("The Discord channel ID")
     .setRequired(true));
 const setRadioCommand = new SlashCommandBuilder().setName("setradio").setDescription("Play 102.7 KIIS-FM Los Angeles in a voice channel").setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).addStringOption((option) => option.setName("channel-id").setDescription("Voice channel ID, or off to disconnect").setRequired(true));
+const autoRoleCommand = new SlashCommandBuilder().setName("autorole").setDescription("Configure the role automatically given to new members").setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+  .addSubcommand(command=>command.setName("set").setDescription("Choose the role given to new members").addRoleOption(option=>option.setName("role").setDescription("Role to give automatically").setRequired(true)))
+  .addSubcommand(command=>command.setName("disable").setDescription("Disable automatic roles in this server"))
+  .addSubcommand(command=>command.setName("status").setDescription("Show the configured automatic role"));
 const linkCommand = new SlashCommandBuilder()
   .setName("link")
   .setDescription("Link your Discord account to your Minecraft account")
@@ -237,7 +241,7 @@ client.once("clientReady", async () => {
   try {
     console.log("MPCS bot build: railway-radio-native-ffmpeg-v2");
     if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON()]);
-    const publicCommands=[linkCommand.toJSON(),embedCommand.toJSON(),sayCommand.toJSON(),statsCommand.toJSON(),scheduleCommand.toJSON()];
+    const publicCommands=[linkCommand.toJSON(),embedCommand.toJSON(),sayCommand.toJSON(),statsCommand.toJSON(),scheduleCommand.toJSON(),autoRoleCommand.toJSON()];
     if (mainGuildId) await (await client.guilds.fetch(mainGuildId)).commands.set([setRadioCommand.toJSON(),teamsCommand.toJSON(),ticketCommand.toJSON(),automodCommand.toJSON(),...publicCommands]);
     if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON(),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
     if (!staffGuildId && !mainGuildId) await client.application.commands.set([setChatCommand.toJSON(),setRadioCommand.toJSON(),teamsCommand.toJSON(),ticketCommand.toJSON(),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
@@ -259,6 +263,16 @@ client.once("clientReady", async () => {
 });
 
 client.on("interactionCreate", async (interaction) => {
+  if(interaction.isChatInputCommand()&&interaction.commandName==="autorole"){
+    if(!interaction.inGuild()||!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild))return void await interaction.reply({content:"You need Manage Server permission.",flags:MessageFlags.Ephemeral});
+    const action=interaction.options.getSubcommand();
+    if(action==="status"){const roleId=settings.autoRoles[interaction.guildId];return void await interaction.reply({content:roleId?`New members automatically receive <@&${roleId}>.`:"Automatic roles are disabled in this server.",flags:MessageFlags.Ephemeral,allowedMentions:{parse:[]}});}
+    if(action==="disable"){delete settings.autoRoles[interaction.guildId];await settings.save();return void await interaction.reply({content:"Automatic roles are now disabled in this server.",flags:MessageFlags.Ephemeral});}
+    const role=interaction.options.getRole("role",true),me=interaction.guild.members.me;
+    if(role.id===interaction.guildId||role.managed)return void await interaction.reply({content:"Choose a normal server role, not `@everyone` or an integration-managed role.",flags:MessageFlags.Ephemeral});
+    if(!me?.permissions.has(PermissionFlagsBits.ManageRoles)||role.position>=me.roles.highest.position)return void await interaction.reply({content:"I cannot give that role. Enable **Manage Roles** and move my bot role above the selected role.",flags:MessageFlags.Ephemeral});
+    settings.autoRoles[interaction.guildId]=role.id;await settings.save();return void await interaction.reply({content:`New members will now automatically receive ${role}.`,flags:MessageFlags.Ephemeral,allowedMentions:{parse:[]}});
+  }
   if(interaction.isChatInputCommand()&&interaction.commandName==="logs")return void await auditLogs.command(interaction);
   if(interaction.isChatInputCommand()&&interaction.commandName==="automod")return void await automod.command(interaction);
   if(interaction.isChatInputCommand()&&interaction.commandName==="ticket"){if(mainGuildId&&interaction.guildId!==mainGuildId)return void interaction.reply({content:"Tickets are only available in the main server.",flags:MessageFlags.Ephemeral});return void await handleTicketCommand(interaction,settings);}
@@ -314,7 +328,7 @@ client.on("interactionCreate", async (interaction) => {
 client.on("messageCreate", message => void automod.message(message).catch(error => console.error("AutoMod message handling failed:", error)));
 client.on("messageDelete",message=>void auditLogs.messageDelete(message).catch(error=>console.error("Message delete logging failed:",error)));
 client.on("messageUpdate",(before,after)=>void auditLogs.messageUpdate(before,after).catch(error=>console.error("Message edit logging failed:",error)));
-client.on("guildMemberAdd",member=>void auditLogs.memberAdd(member).catch(error=>console.error("Member join logging failed:",error)));
+client.on("guildMemberAdd",member=>{void auditLogs.memberAdd(member).catch(error=>console.error("Member join logging failed:",error));const roleId=settings.autoRoles[member.guild.id];if(roleId)void member.roles.add(roleId,"MPCS automatic join role").catch(error=>console.error(`Could not give automatic role ${roleId} to ${member.user.tag}:`,error.message));});
 client.on("guildMemberRemove",member=>void auditLogs.memberRemove(member).catch(error=>console.error("Member leave logging failed:",error)));
 client.on("guildMemberUpdate",(before,after)=>void auditLogs.memberUpdate(before,after).catch(error=>console.error("Member update logging failed:",error)));
 client.on("userUpdate",(before,after)=>void auditLogs.userUpdate(before,after).catch(error=>console.error("User update logging failed:",error)));
