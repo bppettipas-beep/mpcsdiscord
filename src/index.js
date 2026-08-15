@@ -96,7 +96,7 @@ async function flushOutgoing() {
 
 const server = createServer((request, response) => {
   if (request.method === "OPTIONS" && request.url === "/api/schedule") {
-    response.writeHead(204, { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, OPTIONS" }).end();
+    response.writeHead(204, { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, OPTIONS", "Access-Control-Allow-Headers": "Accept, Cache-Control, Content-Type" }).end();
     return;
   }
   if (request.method === "GET" && request.url === "/api/schedule") {
