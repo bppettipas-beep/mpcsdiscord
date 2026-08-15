@@ -86,8 +86,9 @@ export async function handleSchedule(interaction, settings) {
     const dateText = interaction.fields.getTextInputValue("date").trim(), timeText = interaction.fields.getTextInputValue("time").trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText) || !/^(?:[01]?\d|2[0-3]):[0-5]\d$/.test(timeText)) return interaction.reply({ content: "Use `YYYY-MM-DD` for the date and 24-hour `HH:MM` for the EST time.", flags: MessageFlags.Ephemeral });
     const [year, month, day] = dateText.split("-").map(Number), [hour, minute] = timeText.split(":").map(Number);
+    const calendarDate = new Date(Date.UTC(year, month - 1, day));
+    if (calendarDate.getUTCFullYear() !== year || calendarDate.getUTCMonth() !== month - 1 || calendarDate.getUTCDate() !== day) return interaction.reply({ content: "That date does not exist. Enter a valid EST date.", flags: MessageFlags.Ephemeral });
     const date = new Date(Date.UTC(year, month - 1, day, hour + 5, minute));
-    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return interaction.reply({ content: "That date does not exist. Enter a valid EST date.", flags: MessageFlags.Ephemeral });
     return createMatch(interaction, settings, draft, date);
   }
   if (action === "datepage") return interaction.update(chooseDate(Math.max(0, Math.min(6, Number(id) || 0))));
