@@ -67,5 +67,5 @@ export async function handleTeams(i, s) {
   }
   if (op === "save") { draft = s.teamDrafts[key]; if (!draft || draft.id !== id) return i.update(panel(s, "Edit session expired.")); s.teamActions.push({ type: "members", id, members: draft.members }); delete s.teamDrafts[key]; await s.save(); return i.update(panel(s, "Member changes queued.")); }
   if (op === "back" || op === "refresh") return i.update(panel(s));
-  if (op === "delete") { s.teamActions.push({ type: "delete", id }); await s.save(); return i.update(panel(s, "Delete queued.")); }
+  if (op === "delete") { const removed=s.schedules.filter(match=>match.teamOne===id||match.teamTwo===id).length;s.schedules=s.schedules.filter(match=>match.teamOne!==id&&match.teamTwo!==id);s.teamActions.push({ type: "delete", id }); await s.save(); return i.update(panel(s, `Delete queued.${removed?` ${removed} scheduled match${removed===1?"":"es"} removed.`:""}`)); }
 }
