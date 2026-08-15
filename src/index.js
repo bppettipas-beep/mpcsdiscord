@@ -10,6 +10,7 @@ import { scheduleCommand, panel as schedulePanel, handleSchedule } from "./sched
 import { ticketCommand, handleTicketCommand, handleTicketComponent } from "./ticket-ui.js";
 import { automodCommand, AutoModService } from "./automod-service.js";
 import { logsCommand, AuditLogService } from "./audit-log-service.js";
+import { welcomeCommand, handleWelcomeCommand, welcomeMember } from "./welcome-service.js";
 
 const required = ["DISCORD_TOKEN", "BRIDGE_SECRET"];
 const missing = required.filter((name) => !process.env[name]);
@@ -255,7 +256,7 @@ client.once("clientReady", async () => {
   try {
     console.log("MPCS bot build: railway-radio-native-ffmpeg-v2");
     if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON()]);
-    const publicCommands=[linkCommand.toJSON(),embedCommand.toJSON(),sayCommand.toJSON(),statsCommand.toJSON(),scheduleCommand.toJSON(),autoRoleCommand.toJSON()];
+    const publicCommands=[linkCommand.toJSON(),embedCommand.toJSON(),sayCommand.toJSON(),statsCommand.toJSON(),scheduleCommand.toJSON(),autoRoleCommand.toJSON(),welcomeCommand.toJSON()];
     if (mainGuildId) await (await client.guilds.fetch(mainGuildId)).commands.set([setRadioCommand.toJSON(),teamsCommand.toJSON(),teamNicknameCommand.toJSON(),ticketCommand.toJSON(),automodCommand.toJSON(),...publicCommands]);
     if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON(),ticketCommand.toJSON(),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
     if (!staffGuildId && !mainGuildId) await client.application.commands.set([setChatCommand.toJSON(),setRadioCommand.toJSON(),teamsCommand.toJSON(),teamNicknameCommand.toJSON(),ticketCommand.toJSON(),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
@@ -277,6 +278,7 @@ client.once("clientReady", async () => {
 });
 
 client.on("interactionCreate", async (interaction) => {
+  if(interaction.isChatInputCommand()&&interaction.commandName==="welcome")return void await handleWelcomeCommand(interaction,settings);
   if(interaction.isChatInputCommand()&&interaction.commandName==="autorole"){
     if(!interaction.inGuild()||!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild))return void await interaction.reply({content:"You need Manage Server permission.",flags:MessageFlags.Ephemeral});
     const action=interaction.options.getSubcommand();
@@ -343,7 +345,7 @@ client.on("interactionCreate", async (interaction) => {
 client.on("messageCreate", message => void automod.message(message).catch(error => console.error("AutoMod message handling failed:", error)));
 client.on("messageDelete",message=>void auditLogs.messageDelete(message).catch(error=>console.error("Message delete logging failed:",error)));
 client.on("messageUpdate",(before,after)=>void auditLogs.messageUpdate(before,after).catch(error=>console.error("Message edit logging failed:",error)));
-client.on("guildMemberAdd",member=>{void auditLogs.memberAdd(member).catch(error=>console.error("Member join logging failed:",error));const roleId=settings.autoRoles[member.guild.id];if(roleId)void member.roles.add(roleId,"MPCS automatic join role").catch(error=>console.error(`Could not give automatic role ${roleId} to ${member.user.tag}:`,error.message));});
+client.on("guildMemberAdd",member=>{void auditLogs.memberAdd(member).catch(error=>console.error("Member join logging failed:",error));void welcomeMember(member,settings).catch(error=>console.error(`Could not welcome ${member.user.tag}:`,error.message));const roleId=settings.autoRoles[member.guild.id];if(roleId)void member.roles.add(roleId,"MPCS automatic join role").catch(error=>console.error(`Could not give automatic role ${roleId} to ${member.user.tag}:`,error.message));});
 client.on("guildMemberRemove",member=>void auditLogs.memberRemove(member).catch(error=>console.error("Member leave logging failed:",error)));
 client.on("guildMemberUpdate",(before,after)=>void auditLogs.memberUpdate(before,after).catch(error=>console.error("Member update logging failed:",error)));
 client.on("userUpdate",(before,after)=>void auditLogs.userUpdate(before,after).catch(error=>console.error("User update logging failed:",error)));
