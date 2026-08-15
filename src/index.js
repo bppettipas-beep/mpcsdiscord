@@ -27,6 +27,7 @@ const staffGuildId = process.env.STAFF_GUILD_ID || null;
 const auditLogs = new AuditLogService(client,settings,mainGuildId,staffGuildId);
 const teamMemberRoleId = process.env.TEAM_MEMBER_ROLE_ID || "1537632587260887150";
 const outgoing = [];
+const liveMatches = new Map();
 let discordChannel;
 let flushing = false;
 
@@ -95,7 +96,7 @@ async function flushOutgoing() {
 }
 
 const server = createServer((request, response) => {
-  if (request.method === "OPTIONS" && request.url === "/api/schedule") {
+  if (request.method === "OPTIONS" && (request.url === "/api/schedule" || request.url.startsWith("/api/live/"))) {
     response.writeHead(204, { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, OPTIONS", "Access-Control-Allow-Headers": "Accept, Cache-Control, Content-Type" }).end();
     return;
   }
@@ -109,12 +110,17 @@ const server = createServer((request, response) => {
     response.end(JSON.stringify({ matches, teams, modes: ["Crystal", "Sword", "Ultra Hardcore", "Cart", "Spear Mace", "Pot", "Diamond SMP"], updatedAt: new Date().toISOString() }));
     return;
   }
+  if (request.method === "GET" && request.url.startsWith("/api/live/")) {
+    const id=decodeURIComponent(request.url.slice("/api/live/".length));const live=liveMatches.get(id);
+    if(!live||Date.now()-live.updatedAt>15000){liveMatches.delete(id);response.writeHead(404,{"Access-Control-Allow-Origin":"*"}).end();return;}
+    response.writeHead(200,{"Content-Type":"application/json","Cache-Control":"no-store","Access-Control-Allow-Origin":"*"});response.end(JSON.stringify(live));return;
+  }
   if (request.method === "GET" && request.url === "/health") {
     response.writeHead(discordChannel ? 200 : 503, { "Content-Type": "application/json" });
     response.end(JSON.stringify({ ok: Boolean(discordChannel) }));
     return;
   }
-  if (request.method !== "POST" || !["/minecraft-chat", "/link/start", "/link/remove", "/rank-sync", "/teams/sync", "/match/status", "/match/result", "/match/reset"].includes(request.url)) {
+  if (request.method !== "POST" || !["/minecraft-chat", "/link/start", "/link/remove", "/rank-sync", "/teams/sync", "/match/status", "/match/result", "/match/reset", "/match/live"].includes(request.url)) {
     response.writeHead(404).end();
     return;
   }
@@ -133,6 +139,12 @@ const server = createServer((request, response) => {
   request.on("end", () => {
     try {
       const value = JSON.parse(body);
+      if(request.url==="/match/live"){
+        if(typeof value.matchId!=="string"||!["LIVE","ENDED"].includes(value.status)||!Array.isArray(value.players)){response.writeHead(400).end();return;}
+        if(value.status==="ENDED"){liveMatches.delete(value.matchId);response.writeHead(204).end();return;}
+        const previous=liveMatches.get(value.matchId),events=previous?.events||[];if(value.event){events.unshift(value.event);if(events.length>30)events.length=30;}
+        liveMatches.set(value.matchId,{matchId:value.matchId,status:"LIVE",mode:"Sword",round:Number(value.round)||1,scoreOne:Number(value.scoreOne)||0,scoreTwo:Number(value.scoreTwo)||0,players:value.players.slice(0,2),events,updatedAt:Date.now()});response.writeHead(202).end();return;
+      }
       if (request.url === "/match/status" || request.url === "/match/result" || request.url === "/match/reset") {
         const match=settings.schedules.find(entry=>entry.id===value.matchId);if(!match){response.writeHead(404).end();return;}
         if(request.url==="/match/reset"){
