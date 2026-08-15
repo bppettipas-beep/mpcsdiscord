@@ -44,12 +44,12 @@ function chooseDate(page = 0) {
   return { embeds: [new EmbedBuilder().setTitle("CREATE MATCH • DATE").setDescription(`Select the match date. Page ${page + 1}/${maxPages}.\n\n**All selections use EST (UTC−5).**`).setColor(0x00e5ff)], components: [select("schedule:date", "Choose a date", options), row(new ButtonBuilder().setCustomId(`schedule:datepage:${Math.max(0, page - 1)}`).setLabel("Previous").setStyle(ButtonStyle.Secondary).setDisabled(page === 0), new ButtonBuilder().setCustomId(`schedule:datepage:${Math.min(maxPages - 1, page + 1)}`).setLabel("Next").setStyle(ButtonStyle.Primary).setDisabled(page === maxPages - 1))] };
 }
 function chooseHour(draft) {
-  const options = Array.from({ length: 24 }, (_, hour) => ({ label: `${hour % 12 || 12}:00 ${hour < 12 ? "AM" : "PM"}`, value: String(hour), description: `${String(hour).padStart(2, "0")}:00 EST` }));
+  const options = Array.from({ length: 24 }, (_, hour) => hour).filter(hour => selectedEstDate({ ...draft, hour }, 45).getTime() > Date.now()).map(hour => ({ label: `${hour % 12 || 12}:00 ${hour < 12 ? "AM" : "PM"}`, value: String(hour), description: `${String(hour).padStart(2, "0")}:00 EST` }));
   return { embeds: [new EmbedBuilder().setTitle("CREATE MATCH • TIME").setDescription(`Date: **${draft.date}**\nChoose the starting hour.\n\n**EST (UTC−5)**`).setColor(0x00e5ff)], components: [select("schedule:hour", "Choose an hour (EST)", options)] };
 }
 function chooseMinute(draft) {
-  const displayHour = draft.hour % 12 || 12, suffix = draft.hour < 12 ? "AM" : "PM";
-  return { embeds: [new EmbedBuilder().setTitle("CREATE MATCH • TIME").setDescription(`Date: **${draft.date}**\nHour: **${displayHour}:00 ${suffix} EST**\nChoose the minutes.`).setColor(0x00e5ff)], components: [select("schedule:minute", "Choose minutes", [0, 15, 30, 45].map(minute => ({ label: `${displayHour}:${String(minute).padStart(2, "0")} ${suffix}`, value: String(minute), description: "EST (UTC−5)" })))] };
+  const displayHour = draft.hour % 12 || 12, suffix = draft.hour < 12 ? "AM" : "PM", minutes = [0, 15, 30, 45].filter(minute => selectedEstDate(draft, minute).getTime() > Date.now());
+  return { embeds: [new EmbedBuilder().setTitle("CREATE MATCH • TIME").setDescription(`Date: **${draft.date}**\nHour: **${displayHour}:00 ${suffix} EST**\nChoose the minutes.`).setColor(0x00e5ff)], components: [select("schedule:minute", "Choose minutes", minutes.map(minute => ({ label: `${displayHour}:${String(minute).padStart(2, "0")} ${suffix}`, value: String(minute), description: "EST (UTC−5)" })))] };
 }
 function selectedEstDate(draft, minute) {
   const [year, month, day] = draft.date.split("-").map(Number);
@@ -73,7 +73,7 @@ export async function handleSchedule(interaction, settings) {
   if (action === "minute") {
     const date = selectedEstDate(draft, interaction.values[0]);
     const stage = stages.find(entry => entry.id === draft?.stage); if (!draft || !stage || !draft.teamOne || !draft.teamTwo || draft.teamOne === draft.teamTwo) return interaction.reply({ content: "That scheduling session is invalid. Run `/schedule` again.", flags: MessageFlags.Ephemeral });
-    if (!Number.isFinite(date.getTime()) || date.getTime() <= Date.now()) return interaction.update({ ...chooseDate(), content: "That time has already passed. Choose a future date and time." });
+    if (!Number.isFinite(date.getTime()) || date.getTime() <= Date.now()) return interaction.reply({ content: "That time has just passed. Restart `/schedule` and select a later available time.", flags: MessageFlags.Ephemeral });
     settings.schedules.push({ id: `match_${randomUUID().slice(0, 8)}`, stage: stage.id, teamOne: draft.teamOne, teamTwo: draft.teamTwo, bestOf: stage.bestOf, bansPerTeam: bansPerTeam(stage.bestOf), scheduledAt: date.toISOString(), status: "CONFIRMED", createdBy: interaction.user.id, createdAt: new Date().toISOString(), revision: 1 });
     delete settings.teamDrafts[draftKey]; drafts.delete(draftKey); await settings.save(); return interaction.update(panel(settings, "Match created successfully."));
   }
