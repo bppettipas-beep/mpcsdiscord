@@ -109,7 +109,7 @@ const server = createServer((request, response) => {
     response.end(JSON.stringify({ ok: Boolean(discordChannel) }));
     return;
   }
-  if (request.method !== "POST" || !["/minecraft-chat", "/link/start", "/link/remove", "/rank-sync", "/teams/sync"].includes(request.url)) {
+  if (request.method !== "POST" || !["/minecraft-chat", "/link/start", "/link/remove", "/rank-sync", "/teams/sync", "/match/status", "/match/result"].includes(request.url)) {
     response.writeHead(404).end();
     return;
   }
@@ -128,6 +128,18 @@ const server = createServer((request, response) => {
   request.on("end", () => {
     try {
       const value = JSON.parse(body);
+      if (request.url === "/match/status" || request.url === "/match/result") {
+        const match=settings.schedules.find(entry=>entry.id===value.matchId);if(!match){response.writeHead(404).end();return;}
+        if(request.url==="/match/status"){
+          if(!["LIVE","CONFIRMED"].includes(value.status)){response.writeHead(400).end();return;}
+          match.status=value.status;match.startedAt=value.status==="LIVE"?new Date().toISOString():null;match.revision=(match.revision||0)+1;
+        }else{
+          const one=Number(value.scoreOne),two=Number(value.scoreTwo),winner=String(value.winnerTeam||"");
+          if(!Number.isInteger(one)||!Number.isInteger(two)||one<0||two<0||one===two||![match.teamOne,match.teamTwo].includes(winner)){response.writeHead(400).end();return;}
+          match.scoreOne=one;match.scoreTwo=two;match.winnerTeam=winner;match.status="COMPLETED";match.completedAt=new Date().toISOString();match.revision=(match.revision||0)+1;
+        }
+        void settings.save().then(()=>{response.writeHead(200,{"Content-Type":"application/json"});response.end(JSON.stringify(match));}).catch(()=>response.writeHead(500).end());return;
+      }
       if (request.url === "/minecraft-chat") {
         const payload = validateChatPayload(value);
         if (!payload) return response.writeHead(400).end();
