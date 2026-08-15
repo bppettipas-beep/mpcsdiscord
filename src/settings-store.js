@@ -12,6 +12,7 @@ export class SettingsStore {
     this.teamActions = [];
     this.teamDrafts = {};
     this.originalNicknames = {};
+    this.teamNicknameOptOut = {};
     this.schedules = [];
     this.ticketConfig = {};
     this.tickets = {};
@@ -31,6 +32,7 @@ export class SettingsStore {
       this.teamActions = Array.isArray(value.teamActions) ? value.teamActions : [];
       this.teamDrafts = value.teamDrafts && typeof value.teamDrafts === "object" ? value.teamDrafts : {};
       this.originalNicknames = value.originalNicknames && typeof value.originalNicknames === "object" ? value.originalNicknames : {};
+      this.teamNicknameOptOut = value.teamNicknameOptOut && typeof value.teamNicknameOptOut === "object" ? value.teamNicknameOptOut : {};
       this.schedules = Array.isArray(value.schedules) ? value.schedules : [];
       this.ticketConfig = value.ticketConfig && typeof value.ticketConfig === "object" ? value.ticketConfig : {};
       this.tickets = value.tickets && typeof value.tickets === "object" ? value.tickets : {};
@@ -51,7 +53,7 @@ export class SettingsStore {
   async save() {
     await mkdir(dirname(this.filePath), { recursive: true });
     const temporary = `${this.filePath}.tmp`;
-    await writeFile(temporary, JSON.stringify({ channelId: this.channelId, radioChannelId: this.radioChannelId, pending: this.pending, links: this.links, teamSnapshot: this.teamSnapshot, teamActions: this.teamActions, teamDrafts: this.teamDrafts, originalNicknames: this.originalNicknames, schedules: this.schedules, ticketConfig: this.ticketConfig, tickets: this.tickets, automod: this.automod, auditLogs: this.auditLogs, autoRoles: this.autoRoles }, null, 2), "utf8");
+    await writeFile(temporary, JSON.stringify({ channelId: this.channelId, radioChannelId: this.radioChannelId, pending: this.pending, links: this.links, teamSnapshot: this.teamSnapshot, teamActions: this.teamActions, teamDrafts: this.teamDrafts, originalNicknames: this.originalNicknames, teamNicknameOptOut: this.teamNicknameOptOut, schedules: this.schedules, ticketConfig: this.ticketConfig, tickets: this.tickets, automod: this.automod, auditLogs: this.auditLogs, autoRoles: this.autoRoles }, null, 2), "utf8");
     await rename(temporary, this.filePath);
   }
 }

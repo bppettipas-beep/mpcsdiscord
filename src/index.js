@@ -44,6 +44,7 @@ const autoRoleCommand = new SlashCommandBuilder().setName("autorole").setDescrip
   .addSubcommand(command=>command.setName("set").setDescription("Choose the role given to new members").addRoleOption(option=>option.setName("role").setDescription("Role to give automatically").setRequired(true)))
   .addSubcommand(command=>command.setName("disable").setDescription("Disable automatic roles in this server"))
   .addSubcommand(command=>command.setName("status").setDescription("Show the configured automatic role"));
+const teamNicknameCommand=new SlashCommandBuilder().setName("teamnickname").setDescription("Toggle your automatic team nickname").setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 const linkCommand = new SlashCommandBuilder()
   .setName("link")
   .setDescription("Link your Discord account to your Minecraft account")
@@ -240,9 +241,7 @@ async function reconcileTeamMembers() {
       if (team) {
         if (!(uuid in settings.originalNicknames)) settings.originalNicknames[uuid] = member.nickname ?? null;
         if (!member.roles.cache.has(teamMemberRoleId)) await member.roles.add(teamMemberRoleId, "MPCS team membership");
-        const minecraftName = player?.name || "Minecraft", teamPart = team.name.toUpperCase().slice(0, Math.max(1, 32 - minecraftName.length - 3));
-        const nickname = `${teamPart} | ${minecraftName}`;
-        if (member.nickname !== nickname) await member.setNickname(nickname, "MPCS team membership");
+        if(!settings.teamNicknameOptOut[discordId]){const minecraftName = player?.name || "Minecraft", teamPart = team.name.toUpperCase().slice(0, Math.max(1, 32 - minecraftName.length - 3));const nickname = `${teamPart} | ${minecraftName}`;if (member.nickname !== nickname) await member.setNickname(nickname, "MPCS team membership");}
       } else if (uuid in settings.originalNicknames) await removeTeamDiscordState(uuid, discordId);
     } catch (error) { console.error(`Could not synchronize team role/nickname for ${uuid}:`, error); }
   }
@@ -257,9 +256,9 @@ client.once("clientReady", async () => {
     console.log("MPCS bot build: railway-radio-native-ffmpeg-v2");
     if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON()]);
     const publicCommands=[linkCommand.toJSON(),embedCommand.toJSON(),sayCommand.toJSON(),statsCommand.toJSON(),scheduleCommand.toJSON(),autoRoleCommand.toJSON()];
-    if (mainGuildId) await (await client.guilds.fetch(mainGuildId)).commands.set([setRadioCommand.toJSON(),teamsCommand.toJSON(),ticketCommand.toJSON(),automodCommand.toJSON(),...publicCommands]);
+    if (mainGuildId) await (await client.guilds.fetch(mainGuildId)).commands.set([setRadioCommand.toJSON(),teamsCommand.toJSON(),teamNicknameCommand.toJSON(),ticketCommand.toJSON(),automodCommand.toJSON(),...publicCommands]);
     if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON(),ticketCommand.toJSON(),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
-    if (!staffGuildId && !mainGuildId) await client.application.commands.set([setChatCommand.toJSON(),setRadioCommand.toJSON(),teamsCommand.toJSON(),ticketCommand.toJSON(),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
+    if (!staffGuildId && !mainGuildId) await client.application.commands.set([setChatCommand.toJSON(),setRadioCommand.toJSON(),teamsCommand.toJSON(),teamNicknameCommand.toJSON(),ticketCommand.toJSON(),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
     else await client.application.commands.set([]);
     const savedChannelId = await settings.load();
     const initialChannelId = savedChannelId || process.env.DISCORD_CHANNEL_ID;
@@ -290,7 +289,8 @@ client.on("interactionCreate", async (interaction) => {
   }
   if(interaction.isChatInputCommand()&&interaction.commandName==="logs")return void await auditLogs.command(interaction);
   if(interaction.isChatInputCommand()&&interaction.commandName==="automod")return void await automod.command(interaction);
-  if(interaction.isChatInputCommand()&&interaction.commandName==="ticket"){if(mainGuildId&&interaction.guildId!==mainGuildId)return void interaction.reply({content:"Tickets are only available in the main server.",flags:MessageFlags.Ephemeral});return void await handleTicketCommand(interaction,settings);}
+  if(interaction.isChatInputCommand()&&interaction.commandName==="ticket"){const logs=interaction.options.getSubcommand()==="logs";if(logs&&staffGuildId&&interaction.guildId!==staffGuildId)return void interaction.reply({content:"Ticket transcript logs must be configured in the staff server.",flags:MessageFlags.Ephemeral});if(!logs&&mainGuildId&&interaction.guildId!==mainGuildId)return void interaction.reply({content:"Tickets are only available in the main server.",flags:MessageFlags.Ephemeral});return void await handleTicketCommand(interaction,settings);}
+  if(interaction.isChatInputCommand()&&interaction.commandName==="teamnickname"){const linked=Object.entries(settings.links).find(([,discordId])=>discordId===interaction.user.id);if(!linked)return void interaction.reply({content:"Your Discord account must be linked to Minecraft first.",flags:MessageFlags.Ephemeral});const[uuid]=linked,member=await interaction.guild.members.fetch(interaction.user.id);if(settings.teamNicknameOptOut[interaction.user.id]){delete settings.teamNicknameOptOut[interaction.user.id];await reconcileTeamMembers();await settings.save();return void interaction.reply({content:"Your automatic team nickname is now enabled.",flags:MessageFlags.Ephemeral});}settings.teamNicknameOptOut[interaction.user.id]=true;const original=settings.originalNicknames[uuid]??null;await member.setNickname(original,"Administrator disabled automatic MPCS team nickname").catch(()=>{});await settings.save();return void interaction.reply({content:"Your automatic team nickname is now disabled. Your team role and membership were kept.",flags:MessageFlags.Ephemeral});}
   if((interaction.isButton()||interaction.isStringSelectMenu()||interaction.isChannelSelectMenu()||interaction.isRoleSelectMenu()||interaction.isModalSubmit())&&interaction.customId.startsWith("ticket:")){await handleTicketComponent(interaction,settings);return;}
   if(interaction.isChatInputCommand()&&interaction.commandName==="link"){
     const code=interaction.options.getString("code",true).trim();
