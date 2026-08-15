@@ -258,7 +258,7 @@ client.once("clientReady", async () => {
     if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON()]);
     const publicCommands=[linkCommand.toJSON(),embedCommand.toJSON(),sayCommand.toJSON(),statsCommand.toJSON(),scheduleCommand.toJSON(),autoRoleCommand.toJSON()];
     if (mainGuildId) await (await client.guilds.fetch(mainGuildId)).commands.set([setRadioCommand.toJSON(),teamsCommand.toJSON(),ticketCommand.toJSON(),automodCommand.toJSON(),...publicCommands]);
-    if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON(),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
+    if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON(),ticketCommand.toJSON(),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
     if (!staffGuildId && !mainGuildId) await client.application.commands.set([setChatCommand.toJSON(),setRadioCommand.toJSON(),teamsCommand.toJSON(),ticketCommand.toJSON(),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
     else await client.application.commands.set([]);
     const savedChannelId = await settings.load();

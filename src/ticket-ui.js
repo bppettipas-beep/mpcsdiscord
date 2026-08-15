@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelSelectMenuBuilder, ChannelType, EmbedBuilder, MessageFlags, ModalBuilder, PermissionFlagsBits, RoleSelectMenuBuilder, SlashCommandBuilder, StringSelectMenuBuilder, TextInputBuilder, TextInputStyle } from "discord.js";
+import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, ChannelSelectMenuBuilder, ChannelType, EmbedBuilder, MessageFlags, ModalBuilder, PermissionFlagsBits, RoleSelectMenuBuilder, SlashCommandBuilder, StringSelectMenuBuilder, TextInputBuilder, TextInputStyle } from "discord.js";
 
 export const ticketCommand = new SlashCommandBuilder()
   .setName("ticket")
   .setDescription("Set up or manage support tickets")
   .addSubcommand(command => command.setName("panel").setDescription("Open the ticket control panel"))
   .addSubcommand(command => command.setName("edit").setDescription("Edit a specific posted ticket panel").addStringOption(option => option.setName("message-id").setDescription("The Discord message ID of the ticket panel").setRequired(true).setMinLength(17).setMaxLength(20)))
+  .addSubcommand(command => command.setName("logs").setDescription("Choose where ticket transcripts are sent").addChannelOption(option => option.setName("channel").setDescription("Ticket transcript log channel").addChannelTypes(ChannelType.GuildText).setRequired(true)))
   .addSubcommand(command => command.setName("close").setDescription("Close the current ticket"))
   .addSubcommand(command => command.setName("request-close").setDescription("Ask the ticket opener for permission to close"));
 
@@ -87,12 +88,21 @@ async function requestOwnerClose(interaction, settings) {
   return interaction.reply({ content: "Closure request sent to the ticket opener.", flags: MessageFlags.Ephemeral });
 }
 
+async function archiveTicket(interaction,settings,record){
+  const logId=settings.ticketConfig._transcriptLogChannelId;if(!logId)return false;const log=await interaction.client.channels.fetch(logId).catch(()=>null);if(!log?.isSendable())return false;
+  const messages=[];let before;while(true){const batch=await interaction.channel.messages.fetch({limit:100,...(before?{before}:{})});if(!batch.size)break;messages.push(...batch.values());before=batch.last().id;if(batch.size<100)break;}messages.sort((a,b)=>a.createdTimestamp-b.createdTimestamp);
+  const lines=["MPCS TICKET TRANSCRIPT",`Source server: ${interaction.guild.name} (${interaction.guildId})`,`Channel: #${interaction.channel.name} (${interaction.channelId})`,`Type: ${record.typeName||"Support"} #${record.number||"?"}`,`Opened by: ${record.userId}`,`Claimed by: ${record.claimedBy||"Nobody"}`,`Closed by: ${interaction.user.tag} (${interaction.user.id})`,`Opened: ${record.openedAt||"Unknown"}`,`Closed: ${new Date().toISOString()}`,"","MESSAGES","========"];
+  for(const message of messages){lines.push(`[${new Date(message.createdTimestamp).toISOString()}] ${message.author?.tag||"Unknown"} (${message.author?.id||"unknown"}): ${message.content||"[no text]"}`);for(const attachment of message.attachments.values())lines.push(`  Attachment: ${attachment.url}`);for(const embed of message.embeds){if(embed.title)lines.push(`  Embed title: ${embed.title}`);if(embed.description)lines.push(`  Embed: ${embed.description}`);}}
+  const file=new AttachmentBuilder(Buffer.from(lines.join("\n"),"utf8"),{name:`${safeName(interaction.channel.name)}-${interaction.channelId}.txt`});await log.send({embeds:[new EmbedBuilder().setColor(0x00e5ff).setTitle("TICKET TRANSCRIPT").addFields({name:"Source Server",value:interaction.guild.name,inline:true},{name:"Ticket",value:`#${interaction.channel.name}`,inline:true},{name:"Type",value:record.typeName||"Support",inline:true},{name:"Opened By",value:`<@${record.userId}>`,inline:true},{name:"Closed By",value:`${interaction.user.tag}`,inline:true},{name:"Messages",value:String(messages.length),inline:true}).setTimestamp()],files:[file],allowedMentions:{parse:[]}});return true;
+}
+
 export async function handleTicketCommand(interaction, settings) {
   if (!interaction.inGuild()) return interaction.reply({ content: "Tickets are only available inside the MPCS Discord server.", flags: MessageFlags.Ephemeral });
   const subcommand = interaction.options.getSubcommand();
   if (subcommand === "close") return requestClose(interaction, settings);
   if (subcommand === "request-close") return requestOwnerClose(interaction, settings);
   if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return interaction.reply({ content: "You need Manage Server permission to open the ticket control panel.", flags: MessageFlags.Ephemeral });
+  if(subcommand==="logs"){const channel=interaction.options.getChannel("channel",true),me=interaction.guild.members.me;if(!channel.isTextBased()||!channel.isSendable())return interaction.reply({content:"Choose a text channel the bot can send to.",flags:MessageFlags.Ephemeral});if(!channel.permissionsFor(me)?.has([PermissionFlagsBits.ViewChannel,PermissionFlagsBits.SendMessages,PermissionFlagsBits.AttachFiles,PermissionFlagsBits.EmbedLinks]))return interaction.reply({content:"I need View Channel, Send Messages, Attach Files, and Embed Links there.",flags:MessageFlags.Ephemeral});settings.ticketConfig._transcriptLogChannelId=channel.id;await settings.save();return interaction.reply({content:`Ticket transcripts from the main Discord will now be sent to ${channel} in the staff Discord.`,flags:MessageFlags.Ephemeral});}
   if (subcommand === "edit") {
     const messageId = interaction.options.getString("message-id", true).trim(), config = settings.ticketConfig[interaction.guildId] ||= { enabled: true }; let saved = config.panels?.[messageId];
     if (!/^\d{17,20}$/.test(messageId)) return interaction.reply({ content: "Enter a valid Discord message ID.", flags: MessageFlags.Ephemeral });
@@ -165,12 +175,12 @@ export async function handleTicketComponent(interaction, settings) {
   }
   if (action === "cancel-close") return interaction.update({ content: "Ticket closure cancelled.", components: [] });
   if (action === "decline-request") { const found = ticketInChannel(settings, interaction.channelId); if (!found || found[1].userId !== interaction.user.id) return interaction.reply({ content: "Only the person who opened this ticket can answer.", flags: MessageFlags.Ephemeral }); return interaction.update({ content: "The ticket opener chose to keep this ticket open.", embeds: [], components: [] }); }
-  if (action === "accept-request") { const found = ticketInChannel(settings, interaction.channelId); if (!found || found[1].userId !== interaction.user.id) return interaction.reply({ content: "Only the person who opened this ticket can answer.", flags: MessageFlags.Ephemeral }); delete settings.tickets[found[0]]; await settings.save(); await interaction.update({ content: "The ticket opener accepted the closure request. This channel will be deleted in 5 seconds.", embeds: [], components: [] }); setTimeout(() => void interaction.channel.delete(`Ticket closure accepted by ${interaction.user.tag}`).catch(error => console.error("Could not delete accepted ticket channel:", error)), 5000); return; }
+  if (action === "accept-request") { const found = ticketInChannel(settings, interaction.channelId); if (!found || found[1].userId !== interaction.user.id) return interaction.reply({ content: "Only the person who opened this ticket can answer.", flags: MessageFlags.Ephemeral }); const archived=await archiveTicket(interaction,settings,found[1]).catch(error=>{console.error("Could not archive accepted ticket:",error);return false;});delete settings.tickets[found[0]]; await settings.save(); await interaction.update({ content: `The ticket opener accepted the closure request. This channel will be deleted in 5 seconds.${archived?"":" Transcript logging failed or has not been configured."}`, embeds: [], components: [] }); setTimeout(() => void interaction.channel.delete(`Ticket closure accepted by ${interaction.user.tag}`).catch(error => console.error("Could not delete accepted ticket channel:", error)), 5000); return; }
   if (action === "confirm-close") {
     const found = ticketInChannel(settings, interaction.channelId);
     if (!found || !(await canClose(interaction, settings, found[1]))) return interaction.update({ content: "This ticket no longer exists or you cannot close it.", components: [] });
-    delete settings.tickets[found[0]]; await settings.save();
-    await interaction.update({ content: "Ticket closed. This channel will be deleted in 5 seconds.", components: [] });
+    const archived=await archiveTicket(interaction,settings,found[1]).catch(error=>{console.error("Could not archive ticket:",error);return false;});delete settings.tickets[found[0]]; await settings.save();
+    await interaction.update({ content: `Ticket closed. This channel will be deleted in 5 seconds.${archived?"":" Transcript logging failed or has not been configured."}`, components: [] });
     setTimeout(() => void interaction.channel.delete(`Ticket closed by ${interaction.user.tag}`).catch(error => console.error("Could not delete closed ticket channel:", error)), 5000);
     return;
   }
