@@ -5,6 +5,7 @@ export const teamsCommand = new SlashCommandBuilder().setName("teams").setDescri
 const select = (id, placeholder, options, min = 1, max = 1) => new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(id).setPlaceholder(placeholder).setMinValues(min).setMaxValues(max).addOptions(options));
 const linked = (s, uuid) => Boolean(s.links?.[uuid]);
 const playerName = (s, uuid) => (s.teamSnapshot.players || []).find(player => player.uuid === uuid)?.name || uuid;
+const assignedTeam = (s, uuid) => (s.teamSnapshot.teams || []).find(team => (team.members || []).includes(uuid))?.id || null;
 
 export function panel(s, note = "Select a team or create one.") {
   const teams = s.teamSnapshot.teams || [], components = [];
@@ -18,7 +19,7 @@ function colors(stage) {
 }
 
 function memberPicker(s, draft, editing = false) {
-  const candidates = (s.teamSnapshot.players || []).filter(player => player.online || draft.members.includes(player.uuid)).slice(0, 25);
+  const candidates = (s.teamSnapshot.players || []).filter(player => (player.online || draft.members.includes(player.uuid)) && (!assignedTeam(s,player.uuid)||assignedTeam(s,player.uuid)===draft.id)).slice(0, 25);
   const options = candidates.map(player => ({ label: player.name, value: player.uuid, description: linked(s, player.uuid) ? (player.online ? "Linked - online" : "Linked - offline") : "Not linked - Discord sync will wait", default: draft.members.includes(player.uuid) }));
   const components = [];
   if (options.length) components.push(select(editing ? `teams:editmembers:${draft.id}` : "teams:draftmembers", "Select specific Minecraft players", options, 0, Math.min(8, options.length)));
