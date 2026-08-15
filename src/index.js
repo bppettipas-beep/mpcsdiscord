@@ -113,7 +113,7 @@ const server = createServer((request, response) => {
     response.end(JSON.stringify({ ok: Boolean(discordChannel) }));
     return;
   }
-  if (request.method !== "POST" || !["/minecraft-chat", "/link/start", "/link/remove", "/rank-sync", "/teams/sync", "/match/status", "/match/result"].includes(request.url)) {
+  if (request.method !== "POST" || !["/minecraft-chat", "/link/start", "/link/remove", "/rank-sync", "/teams/sync", "/match/status", "/match/result", "/match/reset"].includes(request.url)) {
     response.writeHead(404).end();
     return;
   }
@@ -132,9 +132,11 @@ const server = createServer((request, response) => {
   request.on("end", () => {
     try {
       const value = JSON.parse(body);
-      if (request.url === "/match/status" || request.url === "/match/result") {
+      if (request.url === "/match/status" || request.url === "/match/result" || request.url === "/match/reset") {
         const match=settings.schedules.find(entry=>entry.id===value.matchId);if(!match){response.writeHead(404).end();return;}
-        if(request.url==="/match/status"){
+        if(request.url==="/match/reset"){
+          delete match.scoreOne;delete match.scoreTwo;delete match.winnerTeam;delete match.completedAt;delete match.startedAt;match.status="CONFIRMED";match.revision=(match.revision||0)+1;
+        }else if(request.url==="/match/status"){
           if(!["LIVE","CONFIRMED"].includes(value.status)){response.writeHead(400).end();return;}
           match.status=value.status;match.startedAt=value.status==="LIVE"?new Date().toISOString():null;match.revision=(match.revision||0)+1;
         }else{
