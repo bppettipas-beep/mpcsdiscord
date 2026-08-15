@@ -100,7 +100,7 @@ const server = createServer((request, response) => {
     const matches = settings.schedules.map(match => ({ ...match, teamOneName: match.teamOneName || teamNames.get(match.teamOne) || null, teamTwoName: match.teamTwoName || teamNames.get(match.teamTwo) || null }));
     const playerNames = new Map((settings.teamSnapshot.players || []).map(player => [player.uuid, player.name]));
     const teams = (settings.teamSnapshot.teams || []).map(team => ({ id: team.id, name: team.name || null, tag: team.tag || null, type: team.type || null, players: (team.members || []).map(uuid => ({ uuid, name: playerNames.get(uuid) || null })) }));
-    response.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "public, max-age=30", "Access-Control-Allow-Origin": "*" });
+    response.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache", "Expires": "0", "Access-Control-Allow-Origin": "*" });
     response.end(JSON.stringify({ matches, teams, modes: ["Crystal", "Sword", "Ultra Hardcore", "Cart", "Spear Mace", "Pot", "Diamond SMP"], updatedAt: new Date().toISOString() }));
     return;
   }
