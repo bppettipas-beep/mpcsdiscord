@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, PermissionFlagsBits, SlashCommandBuilder, StringSelectMenuBuilder } from "discord.js";
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, ModalBuilder, PermissionFlagsBits, SlashCommandBuilder, StringSelectMenuBuilder, TextInputBuilder, TextInputStyle } from "discord.js";
 
 export const scheduleCommand = new SlashCommandBuilder().setName("schedule").setDescription("Create and manage MPCS match schedules").setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 const drafts = new Map();
@@ -55,6 +55,21 @@ function selectedEstDate(draft, minute) {
   const [year, month, day] = draft.date.split("-").map(Number);
   return new Date(Date.UTC(year, month - 1, day, Number(draft.hour) + 5, Number(minute)));
 }
+function dateTimeModal() {
+  return new ModalBuilder().setCustomId("schedule:datetime").setTitle("Schedule Match (EST)").addComponents(
+    row(new TextInputBuilder().setCustomId("date").setLabel("DATE (YYYY-MM-DD)").setPlaceholder("2026-08-20").setStyle(TextInputStyle.Short).setMinLength(10).setMaxLength(10).setRequired(true)),
+    row(new TextInputBuilder().setCustomId("time").setLabel("TIME IN EST (HH:MM, 24-HOUR)").setPlaceholder("19:30").setStyle(TextInputStyle.Short).setMinLength(4).setMaxLength(5).setRequired(true))
+  );
+}
+async function createMatch(interaction, settings, draft, date) {
+  const stage = stages.find(entry => entry.id === draft?.stage);
+  if (!draft || !stage || !draft.teamOne || !draft.teamTwo || draft.teamOne === draft.teamTwo) return interaction.reply({ content: "That scheduling session is invalid. Run `/schedule` again.", flags: MessageFlags.Ephemeral });
+  if (!Number.isFinite(date.getTime()) || date.getTime() <= Date.now()) return interaction.reply({ content: "Enter a future date and time in EST. Example: `2026-08-20` and `19:30`.", flags: MessageFlags.Ephemeral });
+  settings.schedules.push({ id: `match_${randomUUID().slice(0, 8)}`, stage: stage.id, teamOne: draft.teamOne, teamTwo: draft.teamTwo, bestOf: stage.bestOf, bansPerTeam: bansPerTeam(stage.bestOf), scheduledAt: date.toISOString(), status: "CONFIRMED", createdBy: interaction.user.id, createdAt: new Date().toISOString(), revision: 1 });
+  drafts.delete(key(interaction));
+  await settings.save();
+  return interaction.reply({ ...panel(settings, "Match created successfully. The website will update within five seconds."), flags: MessageFlags.Ephemeral });
+}
 
 export async function handleSchedule(interaction, settings) {
   if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return interaction.reply({ content: "You need Manage Server.", flags: MessageFlags.Ephemeral });
@@ -65,7 +80,15 @@ export async function handleSchedule(interaction, settings) {
   if (action === "team1") { draft.teamOne = interaction.values[0]; drafts.set(draftKey, draft); return interaction.update(chooseTeam(settings, draft, 2)); }
   if (action === "team2") {
     draft.teamTwo = interaction.values[0]; drafts.set(draftKey, draft);
-    return interaction.update(chooseDate());
+    return interaction.showModal(dateTimeModal());
+  }
+  if (action === "datetime") {
+    const dateText = interaction.fields.getTextInputValue("date").trim(), timeText = interaction.fields.getTextInputValue("time").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText) || !/^(?:[01]?\d|2[0-3]):[0-5]\d$/.test(timeText)) return interaction.reply({ content: "Use `YYYY-MM-DD` for the date and 24-hour `HH:MM` for the EST time.", flags: MessageFlags.Ephemeral });
+    const [year, month, day] = dateText.split("-").map(Number), [hour, minute] = timeText.split(":").map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day, hour + 5, minute));
+    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return interaction.reply({ content: "That date does not exist. Enter a valid EST date.", flags: MessageFlags.Ephemeral });
+    return createMatch(interaction, settings, draft, date);
   }
   if (action === "datepage") return interaction.update(chooseDate(Math.max(0, Math.min(6, Number(id) || 0))));
   if (action === "date") { draft.date = interaction.values[0]; drafts.set(draftKey, draft); return interaction.update(chooseHour(draft)); }
