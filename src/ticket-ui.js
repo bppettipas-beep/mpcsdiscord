@@ -71,7 +71,7 @@ async function canClose(interaction, settings, record) {
 async function isTicketStaff(interaction, settings, record) {
   const config = configFor(settings, interaction.guildId), member = await interaction.guild.members.fetch(interaction.user.id);
   const roleId = record.pingRoleId || config?.supportRoleId;
-  return member.permissions.has(PermissionFlagsBits.ManageChannels) || Boolean(roleId && member.roles.cache.has(roleId));
+  return Boolean(roleId && member.roles.cache.has(roleId));
 }
 
 async function requestClose(interaction, settings) {
@@ -197,12 +197,15 @@ export async function handleTicketComponent(interaction, settings) {
   try {
     config.counters ||= {}; const ticketNumber = config.counters[type.id] = (Number(config.counters[type.id]) || 0) + 1;
     const channelName = `${safeName(type.name).slice(0, 85)}-${ticketNumber}`;
-    const channel = await interaction.guild.channels.create({ name: channelName, type: ChannelType.GuildText, parent: category.id, topic: `${type.name} ticket opened by ${interaction.user.tag} (${interaction.user.id})`, permissionOverwrites: [
+    const permittedIds = new Set([interaction.guild.roles.everyone.id, interaction.user.id, pingRole.id, interaction.client.user.id]);
+    const accessOverwrites = [
       { id: interaction.guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
       { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.EmbedLinks] },
       { id: pingRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages] },
       { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageChannels] }
-    ], reason: `Ticket opened by ${interaction.user.tag}` });
+    ];
+    for (const overwrite of category.permissionOverwrites.cache.values()) if (!permittedIds.has(overwrite.id)) accessOverwrites.push({ id: overwrite.id, deny: [PermissionFlagsBits.ViewChannel] });
+    const channel = await interaction.guild.channels.create({ name: channelName, type: ChannelType.GuildText, parent: category.id, topic: `${type.name} ticket opened by ${interaction.user.tag} (${interaction.user.id})`, permissionOverwrites: accessOverwrites, reason: `Ticket opened by ${interaction.user.tag}` });
     const record = { channelId: channel.id, userId: interaction.user.id, typeId: type.id, typeName: type.name, pingRoleId: pingRole.id, number: ticketNumber, claimedBy: null, openedAt: new Date().toISOString() }; settings.tickets[key] = record; await settings.save();
     const opened = new EmbedBuilder().setColor(0x00e5ff).setTitle(`${type.name.toUpperCase()} TICKET OPENED`).setDescription("Describe anything else staff should know below.").addFields({ name: "Ticket Type", value: type.name, inline: true }, { name: "Ticket Number", value: `#${ticketNumber}`, inline: true }, ...answers.map(item => ({ name: item.question, value: item.answer || "No answer" }))).setFooter({ text: `Opened by ${interaction.user.tag}` }).setTimestamp();
     await channel.send({ content: `${interaction.user} ${pingRole}`, embeds: [opened], components: [ticketActions(record)], allowedMentions: { users: [interaction.user.id], roles: [pingRole.id] } });
