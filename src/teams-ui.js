@@ -19,14 +19,14 @@ function colors(stage) {
 
 function memberPicker(s, draft, editing = false) {
   const candidates = (s.teamSnapshot.players || []).filter(player => player.online || draft.members.includes(player.uuid)).slice(0, 25);
-  const options = candidates.map(player => ({ label: player.name, value: player.uuid, description: linked(s, player.uuid) ? (player.online ? "Linked - online" : "Linked - offline") : "NOT LINKED - cannot be added", default: draft.members.includes(player.uuid) }));
+  const options = candidates.map(player => ({ label: player.name, value: player.uuid, description: linked(s, player.uuid) ? (player.online ? "Linked - online" : "Linked - offline") : "Not linked - Discord sync will wait", default: draft.members.includes(player.uuid) }));
   const components = [];
   if (options.length) components.push(select(editing ? `teams:editmembers:${draft.id}` : "teams:draftmembers", "Select specific Minecraft players", options, 0, Math.min(8, options.length)));
   components.push(new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(editing ? `teams:save:${draft.id}` : "teams:finish").setLabel(editing ? "Save Members" : "Create Team").setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId("teams:back").setLabel("Cancel").setStyle(ButtonStyle.Secondary)
   ));
-  return { embeds: [new EmbedBuilder().setTitle(`${editing ? "Edit" : "Members for"} ${draft.name}`).setDescription(`Selected: ${draft.members.length}/8\nOnly Discord-linked players can join teams.`).setColor(0x00e5ff)], components };
+  return { embeds: [new EmbedBuilder().setTitle(`${editing ? "Edit" : "Members for"} ${draft.name}`).setDescription(`Selected: ${draft.members.length}/8\nDiscord linking is optional.`).setColor(0x00e5ff)], components };
 }
 
 function detail(s, id) {
@@ -52,13 +52,11 @@ export async function handleTeams(i, s) {
   if (op === "color1") { draft.colors = [i.values[0]]; await s.save(); return i.update(colors(2)); }
   if (op === "color2") { draft.colors[1] = i.values[0]; await s.save(); return i.update(memberPicker(s, draft)); }
   if (op === "draftmembers" || op === "editmembers") {
-    const invalid = i.values.filter(uuid => !linked(s, uuid));
-    if (invalid.length) return i.reply({ content: `${invalid.map(uuid => playerName(s, uuid)).join(", ")} must use /link in Minecraft before joining a team.`, flags: MessageFlags.Ephemeral });
     draft = op === "editmembers" ? { id, name: (s.teamSnapshot.teams || []).find(team => team.id === id)?.name || id, members: i.values.slice(0, 8) } : draft;
     draft.members = i.values.slice(0, 8); s.teamDrafts[key] = draft; await s.save(); return i.update(memberPicker(s, draft, op === "editmembers"));
   }
   if (op === "finish") {
-    if (!draft?.members.length) return i.reply({ content: "Select at least one linked player.", flags: MessageFlags.Ephemeral });
+    if (!draft?.members.length) return i.reply({ content: "Select at least one player.", flags: MessageFlags.Ephemeral });
     s.teamActions.push({ type: "create", ...draft }); delete s.teamDrafts[key]; await s.save(); return i.update(panel(s, "Team queued; Minecraft will apply it shortly."));
   }
   if (op === "select") return i.update(detail(s, i.values[0]));
