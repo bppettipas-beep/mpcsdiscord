@@ -6,10 +6,13 @@ export const ticketCommand = new SlashCommandBuilder()
   .setDescription("Set up or manage support tickets")
   .addSubcommand(command => command.setName("panel").setDescription("Open the ticket control panel"))
   .addSubcommand(command => command.setName("edit").setDescription("Edit a specific posted ticket panel").addStringOption(option => option.setName("message-id").setDescription("The Discord message ID of the ticket panel").setRequired(true).setMinLength(17).setMaxLength(20)))
-  .addSubcommand(command => command.setName("logs").setDescription("Choose where ticket transcripts are sent").addChannelOption(option => option.setName("channel").setDescription("Ticket transcript log channel").addChannelTypes(ChannelType.GuildText).setRequired(true)))
-  .addSubcommand(command => command.setName("add").setDescription("Add a member to the current ticket").addUserOption(option => option.setName("member").setDescription("Member to give access to this ticket").setRequired(true)))
-  .addSubcommand(command => command.setName("close").setDescription("Close the current ticket"))
-  .addSubcommand(command => command.setName("request-close").setDescription("Ask the ticket opener for permission to close"));
+  .addSubcommand(command => command.setName("logs").setDescription("Choose where ticket transcripts are sent").addChannelOption(option => option.setName("channel").setDescription("Ticket transcript log channel").addChannelTypes(ChannelType.GuildText).setRequired(true)));
+
+export const ticketActionCommands = [
+  new SlashCommandBuilder().setName("add").setDescription("Add a member to the current ticket").addUserOption(option => option.setName("member").setDescription("Member to give access to this ticket").setRequired(true)),
+  new SlashCommandBuilder().setName("close").setDescription("Close the current ticket"),
+  new SlashCommandBuilder().setName("closerequest").setDescription("Ask the ticket opener for permission to close")
+];
 
 const row = (...components) => new ActionRowBuilder().addComponents(...components);
 const appearance = config => ({ title: config?.appearance?.title || "MPCS SUPPORT", description: config?.appearance?.description || "Need help? Open a private ticket and a staff member will assist you.\n\nPlease create only one ticket at a time.", footer: config?.appearance?.footer || "MPCS Support System" });
@@ -122,7 +125,7 @@ async function archiveTicket(interaction,settings,record){
 
 export async function handleTicketCommand(interaction, settings) {
   if (!interaction.inGuild()) return interaction.reply({ content: "Tickets are only available inside the MPCS Discord server.", flags: MessageFlags.Ephemeral });
-  const subcommand = interaction.options.getSubcommand();
+  const subcommand = interaction.commandName === "add" ? "add" : interaction.commandName === "close" ? "close" : interaction.commandName === "closerequest" ? "request-close" : interaction.options.getSubcommand();
   if (subcommand === "add") return addTicketMember(interaction, settings);
   if (subcommand === "close") return requestClose(interaction, settings);
   if (subcommand === "request-close") return requestOwnerClose(interaction, settings);
