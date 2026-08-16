@@ -76,18 +76,20 @@ export async function repairTicketNumbers(client,settings){let changed=false;con
 async function isTicketStaff(interaction, settings, record) {
   const config = configFor(settings, interaction.guildId), member = await interaction.guild.members.fetch(interaction.user.id);
   const roleId = record.pingRoleId || config?.supportRoleId;
-  return Boolean(roleId && member.roles.cache.has(roleId));
+  if (!roleId) return false;
+  const requiredRole = interaction.guild.roles.cache.get(roleId) || await interaction.guild.roles.fetch(roleId).catch(() => null);
+  return Boolean(requiredRole && (member.roles.cache.has(roleId) || member.roles.highest.position > requiredRole.position));
 }
 
 async function requestClose(interaction, settings) {
   const found = ticketInChannel(settings, interaction.channelId);
-  if (!found || !(await canClose(interaction, settings, found[1]))) return interaction.reply({ content: "Only the staff role assigned to this ticket can close it.", flags: MessageFlags.Ephemeral });
+  if (!found || !(await canClose(interaction, settings, found[1]))) return interaction.reply({ content: "Only the staff role assigned to this ticket, or a higher role, can close it.", flags: MessageFlags.Ephemeral });
   return interaction.reply({ content: "Are you sure you want to permanently close this ticket?", components: [row(new ButtonBuilder().setCustomId("ticket:confirm-close").setLabel("Close Ticket").setStyle(ButtonStyle.Danger), new ButtonBuilder().setCustomId("ticket:cancel-close").setLabel("Cancel").setStyle(ButtonStyle.Secondary))], flags: MessageFlags.Ephemeral });
 }
 
 async function requestOwnerClose(interaction, settings) {
   const found = ticketInChannel(settings, interaction.channelId);
-  if (!found || !(await isTicketStaff(interaction, settings, found[1]))) return interaction.reply({ content: "Only the staff role assigned to this ticket can request closure.", flags: MessageFlags.Ephemeral });
+  if (!found || !(await isTicketStaff(interaction, settings, found[1]))) return interaction.reply({ content: "Only the staff role assigned to this ticket, or a higher role, can request closure.", flags: MessageFlags.Ephemeral });
   await interaction.channel.send({ content: `<@${found[1].userId}>`, embeds: [new EmbedBuilder().setColor(0xfee75c).setTitle("CLOSE TICKET?").setDescription(`${interaction.user} has requested to close this ticket. Do you want to close it?`)], components: [row(new ButtonBuilder().setCustomId("ticket:accept-request").setLabel("Yes, Close Ticket").setStyle(ButtonStyle.Danger), new ButtonBuilder().setCustomId("ticket:decline-request").setLabel("Keep It Open").setStyle(ButtonStyle.Secondary))], allowedMentions: { users: [found[1].userId] } });
   return interaction.reply({ content: "Closure request sent to the ticket opener.", flags: MessageFlags.Ephemeral });
 }
@@ -96,7 +98,7 @@ async function addTicketMember(interaction, settings) {
   const found = ticketInChannel(settings, interaction.channelId);
   if (!found) return interaction.reply({ content: "Use this command inside an active ticket channel.", flags: MessageFlags.Ephemeral });
   const record = found[1];
-  if (!(await isTicketStaff(interaction, settings, record))) return interaction.reply({ content: "Only the staff role assigned to this ticket can add members.", flags: MessageFlags.Ephemeral });
+  if (!(await isTicketStaff(interaction, settings, record))) return interaction.reply({ content: "Only the staff role assigned to this ticket, or a higher role, can add members.", flags: MessageFlags.Ephemeral });
   const user = interaction.options.getUser("member", true), member = await interaction.guild.members.fetch(user.id).catch(() => null);
   if (!member) return interaction.reply({ content: "That user is not a member of this Discord server.", flags: MessageFlags.Ephemeral });
   if (user.bot) return interaction.reply({ content: "Bots cannot be added as ticket participants.", flags: MessageFlags.Ephemeral });
@@ -190,7 +192,7 @@ export async function handleTicketComponent(interaction, settings) {
   if (action === "close") return requestClose(interaction, settings);
   if (action === "claim") {
     const found = ticketInChannel(settings, interaction.channelId);
-    if (!found || !(await isTicketStaff(interaction, settings, found[1]))) return interaction.reply({ content: "Only the role assigned to this ticket can claim it.", flags: MessageFlags.Ephemeral });
+    if (!found || !(await isTicketStaff(interaction, settings, found[1]))) return interaction.reply({ content: "Only the role assigned to this ticket, or a higher role, can claim it.", flags: MessageFlags.Ephemeral });
     if (found[1].claimedBy) return interaction.reply({ content: `This ticket is already claimed by <@${found[1].claimedBy}>.`, flags: MessageFlags.Ephemeral });
     found[1].claimedBy = interaction.user.id; await settings.save();
     await interaction.update({ components: [ticketActions(found[1])] });
