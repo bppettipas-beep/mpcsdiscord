@@ -7,7 +7,7 @@ import { RadioService } from "./radio-service.js";
 import { teamsCommand, panel as teamsPanel, handleTeams } from "./teams-ui.js";
 import { embedCommand, sayCommand, statsCommand, openEmbed, handleEmbed, say, serverStats } from "./admin-ui.js";
 import { scheduleCommand, panel as schedulePanel, handleSchedule } from "./schedule-ui.js";
-import { ticketCommand, handleTicketCommand, handleTicketComponent } from "./ticket-ui.js";
+import { ticketCommand, handleTicketCommand, handleTicketComponent, repairTicketNumbers } from "./ticket-ui.js";
 import { automodCommand, AutoModService } from "./automod-service.js";
 import { logsCommand, AuditLogService } from "./audit-log-service.js";
 import { welcomeCommand, handleWelcomeCommand, welcomeMember } from "./welcome-service.js";
@@ -262,6 +262,7 @@ client.once("clientReady", async () => {
     if (!staffGuildId && !mainGuildId) await client.application.commands.set([setChatCommand.toJSON(),setRadioCommand.toJSON(),teamsCommand.toJSON(),teamNicknameCommand.toJSON(),ticketCommand.toJSON(),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
     else await client.application.commands.set([]);
     const savedChannelId = await settings.load();
+    await repairTicketNumbers(client,settings);
     const initialChannelId = savedChannelId || process.env.DISCORD_CHANNEL_ID;
     if (initialChannelId) await selectDiscordChannel(initialChannelId);
     if (settings.radioChannelId) { const voice = await client.channels.fetch(settings.radioChannelId); if (voice?.isVoiceBased()) await radio.connect(voice); }

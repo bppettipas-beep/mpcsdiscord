@@ -66,9 +66,12 @@ function controlPanel(settings, guildId, notice = "Use the selectors below—eve
 }
 
 async function canClose(interaction, settings, record) {
-  if (record.userId === interaction.user.id) return true;
   return isTicketStaff(interaction, settings, record);
 }
+
+function nextTicketNumber(settings,guildId,config,type){config.counters||={};const counterKey=safeName(type.name);const existing=Object.entries(settings.tickets).filter(([key,record])=>key.startsWith(`${guildId}:`)&&(record.typeId===type.id||safeName(record.typeName||"")===counterKey)).map(([,record])=>Number(record.number)||0);const next=Math.max(Number(config.counters[counterKey])||0,...existing,0)+1;config.counters[counterKey]=next;return next;}
+
+export async function repairTicketNumbers(client,settings){let changed=false;const groups=new Map();for(const[key,record]of Object.entries(settings.tickets)){const guildId=key.split(":",1)[0],typeKey=safeName(record.typeName||"support"),groupKey=`${guildId}:${typeKey}`;if(!groups.has(groupKey))groups.set(groupKey,{guildId,typeKey,records:[]});groups.get(groupKey).records.push(record);}for(const{guildId,typeKey,records}of groups.values()){records.sort((a,b)=>String(a.openedAt||"").localeCompare(String(b.openedAt||""))||String(a.channelId).localeCompare(String(b.channelId)));const used=new Set(),repairs=[];for(const record of records){let number=Number(record.number);if(!Number.isInteger(number)||number<1||used.has(number)){number=1;while(used.has(number))number++;record.number=number;changed=true;repairs.push(record);}used.add(number);}const config=settings.ticketConfig[guildId]||={};config.counters||={};const maximum=Math.max(...used,0);if((Number(config.counters[typeKey])||0)<maximum){config.counters[typeKey]=maximum;changed=true;}for(const record of repairs){const channel=await client.channels.fetch(record.channelId).catch(()=>null);if(!channel?.isTextBased())continue;const desired=`${typeKey.slice(0,85)}-${record.number}`;if(channel.name!==desired)await channel.setName(desired,"Repair duplicate MPCS ticket number").catch(error=>console.error(`Could not rename repaired ticket ${record.channelId}:`,error.message));const messages=await channel.messages.fetch({limit:100}).catch(()=>null);const opening=messages?.find(message=>message.author.id===client.user.id&&message.embeds.some(embed=>(embed.title||"").endsWith("TICKET OPENED")));if(opening){const embeds=opening.embeds.map(embed=>{const builder=EmbedBuilder.from(embed);const fields=(embed.fields||[]).map(field=>field.name==="Ticket Number"?{...field,value:`#${record.number}`}:{...field});return builder.setFields(fields);});await opening.edit({embeds}).catch(error=>console.error(`Could not update repaired ticket message ${opening.id}:`,error.message));}}}if(changed)await settings.save();}
 
 async function isTicketStaff(interaction, settings, record) {
   const config = configFor(settings, interaction.guildId), member = await interaction.guild.members.fetch(interaction.user.id);
@@ -78,7 +81,7 @@ async function isTicketStaff(interaction, settings, record) {
 
 async function requestClose(interaction, settings) {
   const found = ticketInChannel(settings, interaction.channelId);
-  if (!found || !(await canClose(interaction, settings, found[1]))) return interaction.reply({ content: "This is not your ticket, or you do not have permission to close it.", flags: MessageFlags.Ephemeral });
+  if (!found || !(await canClose(interaction, settings, found[1]))) return interaction.reply({ content: "Only the staff role assigned to this ticket can close it.", flags: MessageFlags.Ephemeral });
   return interaction.reply({ content: "Are you sure you want to permanently close this ticket?", components: [row(new ButtonBuilder().setCustomId("ticket:confirm-close").setLabel("Close Ticket").setStyle(ButtonStyle.Danger), new ButtonBuilder().setCustomId("ticket:cancel-close").setLabel("Cancel").setStyle(ButtonStyle.Secondary))], flags: MessageFlags.Ephemeral });
 }
 
@@ -195,7 +198,7 @@ export async function handleTicketComponent(interaction, settings) {
   }
   if (action === "cancel-close") return interaction.update({ content: "Ticket closure cancelled.", components: [] });
   if (action === "decline-request") { const found = ticketInChannel(settings, interaction.channelId); if (!found || found[1].userId !== interaction.user.id) return interaction.reply({ content: "Only the person who opened this ticket can answer.", flags: MessageFlags.Ephemeral }); return interaction.update({ content: "The ticket opener chose to keep this ticket open.", embeds: [], components: [] }); }
-  if (action === "accept-request") { const found = ticketInChannel(settings, interaction.channelId); if (!found || found[1].userId !== interaction.user.id) return interaction.reply({ content: "Only the person who opened this ticket can answer.", flags: MessageFlags.Ephemeral }); const archived=await archiveTicket(interaction,settings,found[1]).catch(error=>{console.error("Could not archive accepted ticket:",error);return false;});delete settings.tickets[found[0]]; await settings.save(); await interaction.update({ content: `The ticket opener accepted the closure request. This channel will be deleted in 5 seconds.${archived?"":" Transcript logging failed or has not been configured."}`, embeds: [], components: [] }); setTimeout(() => void interaction.channel.delete(`Ticket closure accepted by ${interaction.user.tag}`).catch(error => console.error("Could not delete accepted ticket channel:", error)), 5000); return; }
+  if (action === "accept-request") { const found = ticketInChannel(settings, interaction.channelId); if (!found || found[1].userId !== interaction.user.id) return interaction.reply({ content: "Only the person who opened this ticket can answer.", flags: MessageFlags.Ephemeral }); const roleId=found[1].pingRoleId||configFor(settings,interaction.guildId)?.supportRoleId;await interaction.update({ content: `The ticket opener approved the closure. ${roleId?`<@&${roleId}>`:"Staff"} can now close it with the button or \`/ticket close\`.`, embeds: [], components: [], allowedMentions: roleId?{roles:[roleId]}:{parse:[]} }); return; }
   if (action === "confirm-close") {
     const found = ticketInChannel(settings, interaction.channelId);
     if (!found || !(await canClose(interaction, settings, found[1]))) return interaction.update({ content: "This ticket no longer exists or you cannot close it.", components: [] });
@@ -225,7 +228,7 @@ export async function handleTicketComponent(interaction, settings) {
   if (!category || category.type !== ChannelType.GuildCategory || !pingRole) return interaction.reply({ content: "The ticket configuration is no longer valid. Please notify an administrator.", flags: MessageFlags.Ephemeral });
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   try {
-    config.counters ||= {}; const ticketNumber = config.counters[type.id] = (Number(config.counters[type.id]) || 0) + 1;
+    const ticketNumber = nextTicketNumber(settings,interaction.guildId,baseConfig,type);
     const channelName = `${safeName(type.name).slice(0, 85)}-${ticketNumber}`;
     const permittedIds = new Set([interaction.guild.roles.everyone.id, interaction.user.id, pingRole.id, interaction.client.user.id]);
     const accessOverwrites = [
