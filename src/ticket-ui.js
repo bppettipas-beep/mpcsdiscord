@@ -38,7 +38,10 @@ const panelConfigForMessage = (config, messageId) => { const saved = config?.pan
 function typeManager(config, selectedId, notice = "Add a ticket type or select one to edit it.") {
   const types = ticketTypes(config), selected = types.find(type => type.id === selectedId);
   const components = [row(new StringSelectMenuBuilder().setCustomId("ticket:type-select").setPlaceholder("Select a ticket button to edit").addOptions(types.map(type => ({ label: type.label, value: type.id, description: `${type.name} • ${type.style}` }))))];
-  if (selected) components.push(row(new RoleSelectMenuBuilder().setCustomId(`ticket:type-role:${selected.id}`).setPlaceholder(selected.pingRoleId ? "Change this ticket's ping and claim role" : "Select the role this ticket should ping").setMinValues(1).setMaxValues(1)));
+  if (selected) {
+    components.push(row(new RoleSelectMenuBuilder().setCustomId(`ticket:type-role:${selected.id}`).setPlaceholder(selected.pingRoleId ? "Change this ticket's ping and claim role" : "Select the role this ticket should ping").setMinValues(1).setMaxValues(1)));
+    components.push(row(new ChannelSelectMenuBuilder().setCustomId(`ticket:type-category:${selected.id}`).setPlaceholder(selected.categoryId ? "Change this button's ticket category" : "Choose a category for this button").setChannelTypes(ChannelType.GuildCategory).setMinValues(1).setMaxValues(1)));
+  }
   components.push(row(new ButtonBuilder().setCustomId("ticket:add-type").setLabel("Add Button").setEmoji("➕").setStyle(ButtonStyle.Success), ...(selected ? [new ButtonBuilder().setCustomId(`ticket:edit-type:${selected.id}`).setLabel("Edit Name").setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId(`ticket:edit-questions:${selected.id}`).setLabel("Edit Questions").setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId(`ticket:type-style:${selected.id}`).setLabel(`Style: ${selected.style}`).setStyle(ButtonStyle.Secondary)] : [])));
   components.push(row(new ButtonBuilder().setCustomId("ticket:layout").setLabel(config.layout === "dropdown" ? "Layout: Dropdown" : "Layout: Buttons").setStyle(ButtonStyle.Primary), ...(selected ? [new ButtonBuilder().setCustomId(`ticket:delete-type:${selected.id}`).setLabel("Delete Selected").setStyle(ButtonStyle.Danger)] : []), new ButtonBuilder().setCustomId("ticket:back-control").setLabel("Back").setStyle(ButtonStyle.Secondary)));
   return { content: "", embeds: [new EmbedBuilder().setColor(0x00e5ff).setTitle("TICKET BUTTON MANAGER").setDescription(`${notice}\n\n**Public layout: ${config.layout === "dropdown" ? "Dropdown selection" : "Individual buttons"}**\n\n${types.map((type, index) => `**${index + 1}. ${type.label}**\nCreates \`${safeName(type.name)}-1\`, \`${safeName(type.name)}-2\`, etc. • ${type.style}\nPings: ${type.pingRoleId ? `<@&${type.pingRoleId}>` : "default support role"} • ${(type.questions || []).length} question(s)`).join("\n\n")}`).setFooter({ text: `${types.length}/10 ticket options configured` })], components };
@@ -145,7 +148,7 @@ export async function handleTicketCommand(interaction, settings) {
 export async function handleTicketComponent(interaction, settings) {
   let [, action, targetId, sourcePanelId] = interaction.customId.split(":");
   if (action === "open-select") { action = "open"; targetId = interaction.values[0]; }
-  if (["config-panel", "config-category", "config-role", "edit-appearance", "save-appearance", "manage-buttons", "layout", "type-select", "type-role", "add-type", "edit-type", "save-type", "edit-questions", "save-questions", "type-style", "delete-type", "back-control", "post-panel", "update-panel", "toggle", "refresh"].includes(action)) {
+  if (["config-panel", "config-category", "config-role", "edit-appearance", "save-appearance", "manage-buttons", "layout", "type-select", "type-role", "type-category", "add-type", "edit-type", "save-type", "edit-questions", "save-questions", "type-style", "delete-type", "back-control", "post-panel", "update-panel", "toggle", "refresh"].includes(action)) {
     if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return interaction.reply({ content: "You need Manage Server permission to use this control panel.", flags: MessageFlags.Ephemeral });
     const config = settings.ticketConfig[interaction.guildId] ||= { enabled: true };
     if (action === "edit-appearance") {
@@ -161,6 +164,7 @@ export async function handleTicketComponent(interaction, settings) {
     if (action === "back-control") return interaction.update(controlPanel(settings, interaction.guildId));
     if (action === "type-select") return interaction.update(typeManager(config, interaction.values[0], "Selected. Use the controls below to edit this button."));
     if (action === "type-role") { const type = ensureTypes(config).find(entry => entry.id === targetId); if (!type) return interaction.reply({ content: "That ticket button no longer exists.", flags: MessageFlags.Ephemeral }); type.pingRoleId = interaction.values[0]; await settings.save(); return interaction.update(typeManager(config, type.id, "✅ Ping and claim role updated.")); }
+    if (action === "type-category") { const type = ensureTypes(config).find(entry => entry.id === targetId); if (!type) return interaction.reply({ content: "That ticket button no longer exists.", flags: MessageFlags.Ephemeral }); type.categoryId = interaction.values[0]; await settings.save(); return interaction.update(typeManager(config, type.id, "Ticket category updated. New tickets from this button will open there.")); }
     if (action === "add-type" || action === "edit-type") {
       const existing = action === "edit-type" ? ticketTypes(config).find(type => type.id === targetId) : null;
       if (action === "add-type" && ticketTypes(config).length >= 10) return interaction.reply({ content: "A ticket panel can have at most 10 buttons.", flags: MessageFlags.Ephemeral });
@@ -229,7 +233,7 @@ export async function handleTicketComponent(interaction, settings) {
     if (channel) return interaction.reply({ content: `You already have an open ticket: ${channel}`, flags: MessageFlags.Ephemeral });
     delete settings.tickets[key]; await settings.save();
   }
-  const category = await interaction.guild.channels.fetch(config.categoryId).catch(() => null), pingRole = interaction.guild.roles.cache.get(type.pingRoleId || config.supportRoleId);
+  const category = await interaction.guild.channels.fetch(type.categoryId || config.categoryId).catch(() => null), pingRole = interaction.guild.roles.cache.get(type.pingRoleId || config.supportRoleId);
   if (!category || category.type !== ChannelType.GuildCategory || !pingRole) return interaction.reply({ content: "The ticket configuration is no longer valid. Please notify an administrator.", flags: MessageFlags.Ephemeral });
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   try {
