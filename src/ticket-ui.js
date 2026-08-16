@@ -7,6 +7,7 @@ export const ticketCommand = new SlashCommandBuilder()
   .addSubcommand(command => command.setName("panel").setDescription("Open the ticket control panel"))
   .addSubcommand(command => command.setName("edit").setDescription("Edit a specific posted ticket panel").addStringOption(option => option.setName("message-id").setDescription("The Discord message ID of the ticket panel").setRequired(true).setMinLength(17).setMaxLength(20)))
   .addSubcommand(command => command.setName("logs").setDescription("Choose where ticket transcripts are sent").addChannelOption(option => option.setName("channel").setDescription("Ticket transcript log channel").addChannelTypes(ChannelType.GuildText).setRequired(true)))
+  .addSubcommand(command => command.setName("add").setDescription("Add a member to the current ticket").addUserOption(option => option.setName("member").setDescription("Member to give access to this ticket").setRequired(true)))
   .addSubcommand(command => command.setName("close").setDescription("Close the current ticket"))
   .addSubcommand(command => command.setName("request-close").setDescription("Ask the ticket opener for permission to close"));
 
@@ -88,10 +89,28 @@ async function requestOwnerClose(interaction, settings) {
   return interaction.reply({ content: "Closure request sent to the ticket opener.", flags: MessageFlags.Ephemeral });
 }
 
+async function addTicketMember(interaction, settings) {
+  const found = ticketInChannel(settings, interaction.channelId);
+  if (!found) return interaction.reply({ content: "Use this command inside an active ticket channel.", flags: MessageFlags.Ephemeral });
+  const record = found[1];
+  if (!(await isTicketStaff(interaction, settings, record))) return interaction.reply({ content: "Only the staff role assigned to this ticket can add members.", flags: MessageFlags.Ephemeral });
+  const user = interaction.options.getUser("member", true), member = await interaction.guild.members.fetch(user.id).catch(() => null);
+  if (!member) return interaction.reply({ content: "That user is not a member of this Discord server.", flags: MessageFlags.Ephemeral });
+  if (user.bot) return interaction.reply({ content: "Bots cannot be added as ticket participants.", flags: MessageFlags.Ephemeral });
+  if (user.id === record.userId || (record.addedMembers || []).includes(user.id)) return interaction.reply({ content: `${user} already has participant access to this ticket.`, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
+  try {
+    await interaction.channel.permissionOverwrites.edit(member, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true, AttachFiles: true, EmbedLinks: true, AddReactions: true }, { reason: `Added to ticket by ${interaction.user.tag}` });
+  } catch (error) {
+    return interaction.reply({ content: `I could not add that member. Check that I have Manage Channels permission.`, flags: MessageFlags.Ephemeral });
+  }
+  record.addedMembers ||= []; record.addedMembers.push(user.id); await settings.save();
+  await interaction.reply({ content: `✅ ${user} was added to this ticket by ${interaction.user}.`, allowedMentions: { users: [user.id] } });
+}
+
 async function archiveTicket(interaction,settings,record){
   const logId=settings.ticketConfig._transcriptLogChannelId;if(!logId)return false;const log=await interaction.client.channels.fetch(logId).catch(()=>null);if(!log?.isSendable())return false;
   const messages=[];let before;while(true){const batch=await interaction.channel.messages.fetch({limit:100,...(before?{before}:{})});if(!batch.size)break;messages.push(...batch.values());before=batch.last().id;if(batch.size<100)break;}messages.sort((a,b)=>a.createdTimestamp-b.createdTimestamp);
-  const lines=["MPCS TICKET TRANSCRIPT",`Source server: ${interaction.guild.name} (${interaction.guildId})`,`Channel: #${interaction.channel.name} (${interaction.channelId})`,`Type: ${record.typeName||"Support"} #${record.number||"?"}`,`Opened by: ${record.userId}`,`Claimed by: ${record.claimedBy||"Nobody"}`,`Closed by: ${interaction.user.tag} (${interaction.user.id})`,`Opened: ${record.openedAt||"Unknown"}`,`Closed: ${new Date().toISOString()}`,"","MESSAGES","========"];
+  const lines=["MPCS TICKET TRANSCRIPT",`Source server: ${interaction.guild.name} (${interaction.guildId})`,`Channel: #${interaction.channel.name} (${interaction.channelId})`,`Type: ${record.typeName||"Support"} #${record.number||"?"}`,`Opened by: ${record.userId}`,`Added members: ${(record.addedMembers||[]).join(", ")||"None"}`,`Claimed by: ${record.claimedBy||"Nobody"}`,`Closed by: ${interaction.user.tag} (${interaction.user.id})`,`Opened: ${record.openedAt||"Unknown"}`,`Closed: ${new Date().toISOString()}`,"","MESSAGES","========"];
   for(const message of messages){lines.push(`[${new Date(message.createdTimestamp).toISOString()}] ${message.author?.tag||"Unknown"} (${message.author?.id||"unknown"}): ${message.content||"[no text]"}`);for(const attachment of message.attachments.values())lines.push(`  Attachment: ${attachment.url}`);for(const embed of message.embeds){if(embed.title)lines.push(`  Embed title: ${embed.title}`);if(embed.description)lines.push(`  Embed: ${embed.description}`);}}
   const file=new AttachmentBuilder(Buffer.from(lines.join("\n"),"utf8"),{name:`${safeName(interaction.channel.name)}-${interaction.channelId}.txt`});await log.send({embeds:[new EmbedBuilder().setColor(0x00e5ff).setTitle("TICKET TRANSCRIPT").addFields({name:"Source Server",value:interaction.guild.name,inline:true},{name:"Ticket",value:`#${interaction.channel.name}`,inline:true},{name:"Type",value:record.typeName||"Support",inline:true},{name:"Opened By",value:`<@${record.userId}>`,inline:true},{name:"Closed By",value:`${interaction.user.tag}`,inline:true},{name:"Messages",value:String(messages.length),inline:true}).setTimestamp()],files:[file],allowedMentions:{parse:[]}});return true;
 }
@@ -99,6 +118,7 @@ async function archiveTicket(interaction,settings,record){
 export async function handleTicketCommand(interaction, settings) {
   if (!interaction.inGuild()) return interaction.reply({ content: "Tickets are only available inside the MPCS Discord server.", flags: MessageFlags.Ephemeral });
   const subcommand = interaction.options.getSubcommand();
+  if (subcommand === "add") return addTicketMember(interaction, settings);
   if (subcommand === "close") return requestClose(interaction, settings);
   if (subcommand === "request-close") return requestOwnerClose(interaction, settings);
   if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return interaction.reply({ content: "You need Manage Server permission to open the ticket control panel.", flags: MessageFlags.Ephemeral });
