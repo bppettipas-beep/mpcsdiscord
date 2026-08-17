@@ -41,13 +41,14 @@ export async function handleTeams(i, s) {
   const [, op, id] = i.customId.split(":"), key = i.user.id;
   let draft = s.teamDrafts[key];
   if (op === "create") {
-    const modal = new ModalBuilder().setCustomId("teams:name").setTitle("Create Minecraft Team").addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("name").setLabel("Team name").setStyle(TextInputStyle.Short).setMaxLength(16).setRequired(true)));
+    const modal = new ModalBuilder().setCustomId("teams:name").setTitle("Create Minecraft Team").addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("name").setLabel("Team name").setStyle(TextInputStyle.Short).setMaxLength(16).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("leader").setLabel("Team leader Minecraft IGN").setPlaceholder("Exact in-game name").setStyle(TextInputStyle.Short).setMinLength(3).setMaxLength(16).setRequired(true)));
     return i.showModal(modal);
   }
   if (op === "name") {
-    const name = i.fields.getTextInputValue("name").trim(), teamId = name.toLowerCase().replace(/[^a-z0-9_-]/g, "");
+    const name = i.fields.getTextInputValue("name").trim(), leaderName=i.fields.getTextInputValue("leader").trim(), teamId = name.toLowerCase().replace(/[^a-z0-9_-]/g, "");
     if (!teamId) return i.reply({ content: "Enter a valid team name.", flags: MessageFlags.Ephemeral });
-    s.teamDrafts[key] = { id: teamId, name, colors: [], members: [] };
+    if(!/^[A-Za-z0-9_]{3,16}$/.test(leaderName))return i.reply({content:"Enter a valid Minecraft IGN for the team leader.",flags:MessageFlags.Ephemeral});
+    s.teamDrafts[key] = { id: teamId, name, leaderName, colors: [], members: [] };
     await s.save(); return i.reply({ ...colors(1), flags: MessageFlags.Ephemeral });
   }
   if (op === "color1") { draft.colors = [i.values[0]]; await s.save(); return i.update(colors(2)); }
@@ -57,7 +58,7 @@ export async function handleTeams(i, s) {
     draft.members = i.values.slice(0, 8); s.teamDrafts[key] = draft; await s.save(); return i.update(memberPicker(s, draft, op === "editmembers"));
   }
   if (op === "finish") {
-    if (!draft?.members.length) return i.reply({ content: "Select at least one player.", flags: MessageFlags.Ephemeral });
+    if (!draft?.leaderName) return i.reply({ content: "A team leader IGN is required.", flags: MessageFlags.Ephemeral });
     s.teamActions.push({ type: "create", ...draft }); delete s.teamDrafts[key]; await s.save(); return i.update(panel(s, "Team queued; Minecraft will apply it shortly."));
   }
   if (op === "select") return i.update(detail(s, i.values[0]));
