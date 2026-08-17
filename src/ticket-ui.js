@@ -39,13 +39,14 @@ function typeManager(config, selectedId, notice = "Add a ticket type or select o
   const types = ticketTypes(config), selected = types.find(type => type.id === selectedId);
   const components = [row(new StringSelectMenuBuilder().setCustomId("ticket:type-select").setPlaceholder("Select a ticket button to edit").addOptions(types.map(type => ({ label: type.label, value: type.id, description: `${type.name} • ${type.style}` }))))];
   if (selected) {
-    components.push(row(new RoleSelectMenuBuilder().setCustomId(`ticket:type-role:${selected.id}`).setPlaceholder(selected.pingRoleId ? "Change this ticket's ping and claim role" : "Select the role this ticket should ping").setMinValues(1).setMaxValues(1)));
     components.push(row(new ChannelSelectMenuBuilder().setCustomId(`ticket:type-category:${selected.id}`).setPlaceholder(selected.categoryId ? "Change this button's ticket category" : "Choose a category for this button").setChannelTypes(ChannelType.GuildCategory).setMinValues(1).setMaxValues(1)));
   }
-  components.push(row(new ButtonBuilder().setCustomId("ticket:add-type").setLabel("Add Button").setEmoji("➕").setStyle(ButtonStyle.Success), ...(selected ? [new ButtonBuilder().setCustomId(`ticket:edit-type:${selected.id}`).setLabel("Edit Name").setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId(`ticket:edit-questions:${selected.id}`).setLabel("Edit Questions").setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId(`ticket:type-style:${selected.id}`).setLabel(`Style: ${selected.style}`).setStyle(ButtonStyle.Secondary)] : [])));
+  components.push(row(new ButtonBuilder().setCustomId("ticket:add-type").setLabel("Add Button").setEmoji("➕").setStyle(ButtonStyle.Success), ...(selected ? [new ButtonBuilder().setCustomId(`ticket:edit-type:${selected.id}`).setLabel("Edit Name").setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId(`ticket:edit-questions:${selected.id}`).setLabel("Edit Questions").setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId(`ticket:type-access:${selected.id}`).setLabel("Access Roles").setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId(`ticket:type-style:${selected.id}`).setLabel(`Style: ${selected.style}`).setStyle(ButtonStyle.Secondary)] : [])));
   components.push(row(new ButtonBuilder().setCustomId("ticket:layout").setLabel(config.layout === "dropdown" ? "Layout: Dropdown" : "Layout: Buttons").setStyle(ButtonStyle.Primary), ...(selected ? [new ButtonBuilder().setCustomId(`ticket:delete-type:${selected.id}`).setLabel("Delete Selected").setStyle(ButtonStyle.Danger)] : []), new ButtonBuilder().setCustomId("ticket:back-control").setLabel("Back").setStyle(ButtonStyle.Secondary)));
   return { content: "", embeds: [new EmbedBuilder().setColor(0x00e5ff).setTitle("TICKET BUTTON MANAGER").setDescription(`${notice}\n\n**Public layout: ${config.layout === "dropdown" ? "Dropdown selection" : "Individual buttons"}**\n\n${types.map((type, index) => `**${index + 1}. ${type.label}**\nCreates \`${safeName(type.name)}-1\`, \`${safeName(type.name)}-2\`, etc. • ${type.style}\nPings: ${type.pingRoleId ? `<@&${type.pingRoleId}>` : "default support role"} • ${(type.questions || []).length} question(s)`).join("\n\n")}`).setFooter({ text: `${types.length}/10 ticket options configured` })], components };
 }
+
+function accessRoleManager(type){return{content:"",embeds:[new EmbedBuilder().setColor(0x00e5ff).setTitle(`${type.label} · ACCESS ROLES`).setDescription(`**Ping/support role:** ${type.pingRoleId?`<@&${type.pingRoleId}>`:"default support role"}\n**Restricted role:** ${type.restrictedRoleId?`<@&${type.restrictedRoleId}>`:"none"}\n\nMembers with the restricted role cannot open this ticket type. If someone has both roles, the restriction wins.`)],components:[row(new RoleSelectMenuBuilder().setCustomId(`ticket:type-ping-role:${type.id}`).setPlaceholder("Select the role to ping and grant staff access").setMinValues(1).setMaxValues(1)),row(new RoleSelectMenuBuilder().setCustomId(`ticket:type-restrict-role:${type.id}`).setPlaceholder("Select the role to restrict").setMinValues(1).setMaxValues(1)),row(new ButtonBuilder().setCustomId(`ticket:type-clear-restrict:${type.id}`).setLabel("Clear Restriction").setStyle(ButtonStyle.Secondary).setDisabled(!type.restrictedRoleId),new ButtonBuilder().setCustomId(`ticket:type-access-back:${type.id}`).setLabel("Back").setStyle(ButtonStyle.Primary))]};}
 
 function controlPanel(settings, guildId, notice = "Use the selectors below—everything saves automatically.") {
   const config = configFor(settings, guildId) || {};
@@ -148,7 +149,7 @@ export async function handleTicketCommand(interaction, settings) {
 export async function handleTicketComponent(interaction, settings) {
   let [, action, targetId, sourcePanelId] = interaction.customId.split(":");
   if (action === "open-select") { action = "open"; targetId = interaction.values[0]; }
-  if (["config-panel", "config-category", "config-role", "edit-appearance", "save-appearance", "manage-buttons", "layout", "type-select", "type-role", "type-category", "add-type", "edit-type", "save-type", "edit-questions", "save-questions", "type-style", "delete-type", "back-control", "post-panel", "update-panel", "toggle", "refresh"].includes(action)) {
+  if (["config-panel", "config-category", "config-role", "edit-appearance", "save-appearance", "manage-buttons", "layout", "type-select", "type-role", "type-ping-role", "type-restrict-role", "type-clear-restrict", "type-access", "type-access-back", "type-category", "add-type", "edit-type", "save-type", "edit-questions", "save-questions", "type-style", "delete-type", "back-control", "post-panel", "update-panel", "toggle", "refresh"].includes(action)) {
     if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return interaction.reply({ content: "You need Manage Server permission to use this control panel.", flags: MessageFlags.Ephemeral });
     const config = settings.ticketConfig[interaction.guildId] ||= { enabled: true };
     if (action === "edit-appearance") {
@@ -164,6 +165,10 @@ export async function handleTicketComponent(interaction, settings) {
     if (action === "back-control") return interaction.update(controlPanel(settings, interaction.guildId));
     if (action === "type-select") return interaction.update(typeManager(config, interaction.values[0], "Selected. Use the controls below to edit this button."));
     if (action === "type-role") { const type = ensureTypes(config).find(entry => entry.id === targetId); if (!type) return interaction.reply({ content: "That ticket button no longer exists.", flags: MessageFlags.Ephemeral }); type.pingRoleId = interaction.values[0]; await settings.save(); return interaction.update(typeManager(config, type.id, "✅ Ping and claim role updated.")); }
+    if(action==="type-access"){const type=ensureTypes(config).find(entry=>entry.id===targetId);if(!type)return interaction.reply({content:"That ticket button no longer exists.",flags:MessageFlags.Ephemeral});return interaction.update(accessRoleManager(type));}
+    if(action==="type-ping-role"||action==="type-restrict-role"){const type=ensureTypes(config).find(entry=>entry.id===targetId);if(!type)return interaction.reply({content:"That ticket button no longer exists.",flags:MessageFlags.Ephemeral});if(action==="type-ping-role")type.pingRoleId=interaction.values[0];else type.restrictedRoleId=interaction.values[0];await settings.save();return interaction.update(accessRoleManager(type));}
+    if(action==="type-clear-restrict"){const type=ensureTypes(config).find(entry=>entry.id===targetId);if(!type)return interaction.reply({content:"That ticket button no longer exists.",flags:MessageFlags.Ephemeral});delete type.restrictedRoleId;await settings.save();return interaction.update(accessRoleManager(type));}
+    if(action==="type-access-back")return interaction.update(typeManager(config,targetId,"Access roles saved."));
     if (action === "type-category") { const type = ensureTypes(config).find(entry => entry.id === targetId); if (!type) return interaction.reply({ content: "That ticket button no longer exists.", flags: MessageFlags.Ephemeral }); type.categoryId = interaction.values[0]; await settings.save(); return interaction.update(typeManager(config, type.id, "Ticket category updated. New tickets from this button will open there.")); }
     if (action === "add-type" || action === "edit-type") {
       const existing = action === "edit-type" ? ticketTypes(config).find(type => type.id === targetId) : null;
@@ -221,6 +226,8 @@ export async function handleTicketComponent(interaction, settings) {
   if (!config || config.enabled === false) return interaction.reply({ content: config?.enabled === false ? "New tickets are currently disabled." : "The ticket system has not been configured yet.", flags: MessageFlags.Ephemeral });
   const type = ticketTypes(config).find(entry => entry.id === targetId) || (!targetId ? ticketTypes(config)[0] : null);
   if (!type) return interaction.reply({ content: "That ticket type is no longer available. Please use the newest ticket panel.", flags: MessageFlags.Ephemeral });
+  const openingMember=await interaction.guild.members.fetch(interaction.user.id).catch(()=>null);
+  if(type.restrictedRoleId&&openingMember?.roles.cache.has(type.restrictedRoleId))return interaction.reply({content:`You cannot open this ticket type because you have the restricted <@&${type.restrictedRoleId}> role.`,flags:MessageFlags.Ephemeral,allowedMentions:{parse:[]}});
   const questions = type.questions || [];
   if (action === "open" && questions.length) {
     const inputs = questions.map((question, index) => row(new TextInputBuilder().setCustomId(`answer-${index}`).setLabel(`Question ${index + 1}`).setPlaceholder(question).setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000)));
@@ -239,11 +246,12 @@ export async function handleTicketComponent(interaction, settings) {
   try {
     const ticketNumber = nextTicketNumber(settings,interaction.guildId,baseConfig,type);
     const channelName = `${safeName(type.name).slice(0, 85)}-${ticketNumber}`;
-    const permittedIds = new Set([interaction.guild.roles.everyone.id, interaction.user.id, pingRole.id, interaction.client.user.id]);
+    const permittedIds = new Set([interaction.guild.roles.everyone.id, interaction.user.id, pingRole.id, interaction.client.user.id,...(type.restrictedRoleId?[type.restrictedRoleId]:[])]);
     const accessOverwrites = [
       { id: interaction.guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
       { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.EmbedLinks] },
-      { id: pingRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages] },
+      ...(type.restrictedRoleId===pingRole.id?[]:[{ id: pingRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages] }]),
+      ...(type.restrictedRoleId?[{id:type.restrictedRoleId,deny:[PermissionFlagsBits.ViewChannel]}]:[]),
       { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageChannels] }
     ];
     for (const overwrite of category.permissionOverwrites.cache.values()) if (!permittedIds.has(overwrite.id)) accessOverwrites.push({ id: overwrite.id, deny: [PermissionFlagsBits.ViewChannel] });
