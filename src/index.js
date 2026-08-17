@@ -11,6 +11,7 @@ import { ticketCommand, ticketActionCommands, handleTicketCommand, handleTicketC
 import { automodCommand, AutoModService } from "./automod-service.js";
 import { logsCommand, AuditLogService } from "./audit-log-service.js";
 import { welcomeCommand, handleWelcomeCommand, welcomeMember } from "./welcome-service.js";
+import { teamSignupCommand, signupPanel, handleTeamSignup } from "./team-signup-ui.js";
 
 const required = ["DISCORD_TOKEN", "BRIDGE_SECRET"];
 const missing = required.filter((name) => !process.env[name]);
@@ -41,6 +42,7 @@ const setChatCommand = new SlashCommandBuilder()
     .setDescription("The Discord channel ID")
     .setRequired(true));
 const setRadioCommand = new SlashCommandBuilder().setName("setradio").setDescription("Play 102.7 KIIS-FM Los Angeles in a voice channel").setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).addStringOption((option) => option.setName("channel-id").setDescription("Voice channel ID, or off to disconnect").setRequired(true));
+const radioVolumeCommand = new SlashCommandBuilder().setName("radiovolume").setDescription("Adjust the radio volume").setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).addIntegerOption(option=>option.setName("percent").setDescription("Volume from 0 to 100 percent").setMinValue(0).setMaxValue(100).setRequired(true));
 const autoRoleCommand = new SlashCommandBuilder().setName("autorole").setDescription("Configure the role automatically given to new members").setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
   .addSubcommand(command=>command.setName("set").setDescription("Choose the role given to new members").addRoleOption(option=>option.setName("role").setDescription("Role to give automatically").setRequired(true)))
   .addSubcommand(command=>command.setName("disable").setDescription("Disable automatic roles in this server"))
@@ -257,11 +259,12 @@ client.once("clientReady", async () => {
     console.log("MPCS bot build: railway-radio-native-ffmpeg-v2");
     if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON()]);
     const publicCommands=[linkCommand.toJSON(),embedCommand.toJSON(),sayCommand.toJSON(),statsCommand.toJSON(),scheduleCommand.toJSON(),autoRoleCommand.toJSON(),welcomeCommand.toJSON()];
-    if (mainGuildId) await (await client.guilds.fetch(mainGuildId)).commands.set([setRadioCommand.toJSON(),teamsCommand.toJSON(),teamNicknameCommand.toJSON(),ticketCommand.toJSON(),...ticketActionCommands.map(command=>command.toJSON()),automodCommand.toJSON(),...publicCommands]);
+    if (mainGuildId) await (await client.guilds.fetch(mainGuildId)).commands.set([setRadioCommand.toJSON(),radioVolumeCommand.toJSON(),teamsCommand.toJSON(),teamSignupCommand.toJSON(),teamNicknameCommand.toJSON(),ticketCommand.toJSON(),...ticketActionCommands.map(command=>command.toJSON()),automodCommand.toJSON(),...publicCommands]);
     if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON(),ticketCommand.toJSON(),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
-    if (!staffGuildId && !mainGuildId) await client.application.commands.set([setChatCommand.toJSON(),setRadioCommand.toJSON(),teamsCommand.toJSON(),teamNicknameCommand.toJSON(),ticketCommand.toJSON(),...ticketActionCommands.map(command=>command.toJSON()),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
+    if (!staffGuildId && !mainGuildId) await client.application.commands.set([setChatCommand.toJSON(),setRadioCommand.toJSON(),radioVolumeCommand.toJSON(),teamsCommand.toJSON(),teamSignupCommand.toJSON(),teamNicknameCommand.toJSON(),ticketCommand.toJSON(),...ticketActionCommands.map(command=>command.toJSON()),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
     else await client.application.commands.set([]);
     const savedChannelId = await settings.load();
+    radio.setVolume(settings.radioVolume);
     await repairTicketNumbers(client,settings);
     for(const[guildId,config]of Object.entries(settings.ticketConfig))if(guildId!=="_transcriptLogChannelId"&&(config.restrictedRoleIds||[]).length){const guild=await client.guilds.fetch(guildId).catch(()=>null),members=guild?await guild.members.fetch().catch(()=>null):null;if(members)for(const member of members.values())if(config.restrictedRoleIds.some(roleId=>member.roles.cache.has(roleId)))await enforceTicketRestrictionsForMember(member,settings);}
     const initialChannelId = savedChannelId || process.env.DISCORD_CHANNEL_ID;
@@ -316,15 +319,18 @@ client.on("interactionCreate", async (interaction) => {
   if((interaction.isButton()||interaction.isModalSubmit())&&interaction.customId.startsWith("embed:")){await handleEmbed(interaction);return;}
   if(interaction.isChatInputCommand()&&interaction.commandName==="teams"){if(mainGuildId&&interaction.guildId!==mainGuildId)return void interaction.reply({content:"This command is only available in the main server.",flags:MessageFlags.Ephemeral});return void interaction.reply({...teamsPanel(settings),flags:MessageFlags.Ephemeral});}
   if((interaction.isButton()||interaction.isStringSelectMenu()||interaction.isUserSelectMenu()||interaction.isModalSubmit())&&interaction.customId.startsWith("teams:")){await handleTeams(interaction,settings);return;}
-  if (!interaction.isChatInputCommand() || !["setchat", "setradio"].includes(interaction.commandName)) return;
+  if(interaction.isChatInputCommand()&&interaction.commandName==="teamsignup"){if(mainGuildId&&interaction.guildId!==mainGuildId)return void interaction.reply({content:"This command is only available in the main server.",flags:MessageFlags.Ephemeral});return void interaction.reply(signupPanel());}
+  if((interaction.isButton()||interaction.isUserSelectMenu()||interaction.isModalSubmit())&&interaction.customId.startsWith("signup:")){await handleTeamSignup(interaction,settings);return;}
+  if (!interaction.isChatInputCommand() || !["setchat", "setradio", "radiovolume"].includes(interaction.commandName)) return;
   if (!interaction.inGuild() || !interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
     await interaction.reply({ content: "You need Manage Server permission to use this command.", flags: MessageFlags.Ephemeral });
     return;
   }
   if (interaction.commandName === "setchat" && staffGuildId && interaction.guildId !== staffGuildId) { await interaction.reply({ content: "This command is only available in the staff server.", flags: MessageFlags.Ephemeral }); return; }
-  if (interaction.commandName === "setradio" && mainGuildId && interaction.guildId !== mainGuildId) { await interaction.reply({ content: "This command is only available in the main server.", flags: MessageFlags.Ephemeral }); return; }
+  if ((interaction.commandName === "setradio" || interaction.commandName === "radiovolume") && mainGuildId && interaction.guildId !== mainGuildId) { await interaction.reply({ content: "This command is only available in the main server.", flags: MessageFlags.Ephemeral }); return; }
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   try {
+    if (interaction.commandName === "radiovolume") { const percent=interaction.options.getInteger("percent",true); settings.radioVolume=percent; radio.setVolume(percent); await settings.save(); await interaction.editReply(`Radio volume set to **${percent}%**.`); return; }
     const raw = interaction.options.getString("channel-id", true).trim();
     if (interaction.commandName === "setradio") {
       if (raw.toLowerCase() === "off") { radio.stop(); settings.radioChannelId=null; await settings.save(); await interaction.editReply("Radio disconnected."); return; }

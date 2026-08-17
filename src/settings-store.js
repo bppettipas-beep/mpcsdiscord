@@ -8,9 +8,11 @@ export class SettingsStore {
     this.pending = {};
     this.links = {};
     this.radioChannelId = null;
+    this.radioVolume = 80;
     this.teamSnapshot = { teams: [], players: [] };
     this.teamActions = [];
     this.teamDrafts = {};
+    this.teamSignupDrafts = {};
     this.originalNicknames = {};
     this.teamNicknameOptOut = {};
     this.schedules = [];
@@ -29,9 +31,11 @@ export class SettingsStore {
       this.pending = value.pending && typeof value.pending === "object" ? value.pending : {};
       this.links = value.links && typeof value.links === "object" ? value.links : {};
       this.radioChannelId = typeof value.radioChannelId === "string" ? value.radioChannelId : null;
+      this.radioVolume = Number.isFinite(Number(value.radioVolume)) ? Math.max(0, Math.min(100, Number(value.radioVolume))) : 80;
       this.teamSnapshot = value.teamSnapshot || { teams: [], players: [] };
       this.teamActions = Array.isArray(value.teamActions) ? value.teamActions : [];
       this.teamDrafts = value.teamDrafts && typeof value.teamDrafts === "object" ? value.teamDrafts : {};
+      this.teamSignupDrafts = value.teamSignupDrafts && typeof value.teamSignupDrafts === "object" ? value.teamSignupDrafts : {};
       this.originalNicknames = value.originalNicknames && typeof value.originalNicknames === "object" ? value.originalNicknames : {};
       this.teamNicknameOptOut = value.teamNicknameOptOut && typeof value.teamNicknameOptOut === "object" ? value.teamNicknameOptOut : {};
       this.schedules = Array.isArray(value.schedules) ? value.schedules : [];
@@ -55,7 +59,7 @@ export class SettingsStore {
   async save() {
     await mkdir(dirname(this.filePath), { recursive: true });
     const temporary = `${this.filePath}.tmp`;
-    await writeFile(temporary, JSON.stringify({ channelId: this.channelId, radioChannelId: this.radioChannelId, pending: this.pending, links: this.links, teamSnapshot: this.teamSnapshot, teamActions: this.teamActions, teamDrafts: this.teamDrafts, originalNicknames: this.originalNicknames, teamNicknameOptOut: this.teamNicknameOptOut, schedules: this.schedules, ticketConfig: this.ticketConfig, tickets: this.tickets, automod: this.automod, auditLogs: this.auditLogs, autoRoles: this.autoRoles, welcomeMessages: this.welcomeMessages }, null, 2), "utf8");
+    await writeFile(temporary, JSON.stringify({ channelId: this.channelId, radioChannelId: this.radioChannelId, radioVolume: this.radioVolume, pending: this.pending, links: this.links, teamSnapshot: this.teamSnapshot, teamActions: this.teamActions, teamDrafts: this.teamDrafts, teamSignupDrafts: this.teamSignupDrafts, originalNicknames: this.originalNicknames, teamNicknameOptOut: this.teamNicknameOptOut, schedules: this.schedules, ticketConfig: this.ticketConfig, tickets: this.tickets, automod: this.automod, auditLogs: this.auditLogs, autoRoles: this.autoRoles, welcomeMessages: this.welcomeMessages }, null, 2), "utf8");
     await rename(temporary, this.filePath);
   }
 }

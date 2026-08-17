@@ -28,6 +28,8 @@ The selected channel is stored in `/data/config.json`, so it survives deployment
 
 Run `/teams` in the main server with **Manage Server** permission to open the private Minecraft team manager. It supports create, edit colors/name, linked-member selection (up to 8), and deletion. Minecraft and Discord synchronize about every 10 seconds.
 
+Run `/teamsignup` with **Manage Server** permission in the public signup channel to post the permanent team signup panel. Captains use the button to select exactly seven Discord teammates and enter all eight Minecraft IGNs. The bot verifies each IGN with Mojang, rejects duplicate/already-linked/already-rostered accounts, shows a final confirmation screen, and pre-links the verified UUIDs so Minecraft membership and the Discord team role synchronize even if a player has never joined the Minecraft server before.
+
 ## Minecraft configuration
 
 After installing the newly built MPCSCore JAR once, edit `plugins/MPCSCore/discord.yml`:
@@ -45,7 +47,7 @@ The Railway health endpoint is `/health`. It returns HTTP 200 after the bot has 
 
 ## 102.7 KIIS-FM Los Angeles radio
 
-Run `/setradio channel-id:VOICE_CHANNEL_ID` with **Manage Server** permission. The bot joins that voice channel and continuously plays 102.7 KIIS-FM, LA's Top 40/pop station. Run `/setradio channel-id:off` to disconnect it. The bot needs **View Channel**, **Connect**, and **Speak** permissions.
+Run `/setradio channel-id:VOICE_CHANNEL_ID` with **Manage Server** permission. The bot joins that voice channel and continuously plays 102.7 KIIS-FM, LA's Top 40/pop station. Run `/setradio channel-id:off` to disconnect it. Use `/radiovolume percent:20` to set the volume to 20% (valid range: 0–100); it applies immediately and persists across restarts. The bot needs **View Channel**, **Connect**, and **Speak** permissions.
 
 Railway builds the included `Dockerfile`, which installs native Linux FFmpeg automatically.
 
