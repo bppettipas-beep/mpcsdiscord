@@ -6,6 +6,8 @@ export const ticketCommand = new SlashCommandBuilder()
   .setDescription("Set up or manage support tickets")
   .addSubcommand(command => command.setName("panel").setDescription("Open the ticket control panel"))
   .addSubcommand(command => command.setName("edit").setDescription("Edit a specific posted ticket panel").addStringOption(option => option.setName("message-id").setDescription("The Discord message ID of the ticket panel").setRequired(true).setMinLength(17).setMaxLength(20)))
+  .addSubcommand(command => command.setName("restrict").setDescription("Block a role from every ticket").addRoleOption(option => option.setName("role").setDescription("Role to block from all tickets").setRequired(true)))
+  .addSubcommand(command => command.setName("unrestrict").setDescription("Remove a server-wide ticket restriction").addRoleOption(option => option.setName("role").setDescription("Role to allow again").setRequired(true)))
   .addSubcommand(command => command.setName("logs").setDescription("Choose where ticket transcripts are sent").addChannelOption(option => option.setName("channel").setDescription("Ticket transcript log channel").addChannelTypes(ChannelType.GuildText).setRequired(true)));
 
 export const ticketActionCommands = [
@@ -134,6 +136,7 @@ export async function handleTicketCommand(interaction, settings) {
   if (subcommand === "close") return requestClose(interaction, settings);
   if (subcommand === "request-close") return requestOwnerClose(interaction, settings);
   if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return interaction.reply({ content: "You need Manage Server permission to open the ticket control panel.", flags: MessageFlags.Ephemeral });
+  if(subcommand==="restrict"||subcommand==="unrestrict"){const config=settings.ticketConfig[interaction.guildId]||={enabled:true},role=interaction.options.getRole("role",true),roles=new Set(config.restrictedRoleIds||[]);if(subcommand==="restrict")roles.add(role.id);else roles.delete(role.id);config.restrictedRoleIds=[...roles];await settings.save();return interaction.reply({content:subcommand==="restrict"?`${role} is now restricted from every ticket. This overrides support-role access.`:`${role} is no longer globally restricted from tickets.`,flags:MessageFlags.Ephemeral,allowedMentions:{parse:[]}});}
   if(subcommand==="logs"){const channel=interaction.options.getChannel("channel",true),me=interaction.guild.members.me;if(!channel.isTextBased()||!channel.isSendable())return interaction.reply({content:"Choose a text channel the bot can send to.",flags:MessageFlags.Ephemeral});if(!channel.permissionsFor(me)?.has([PermissionFlagsBits.ViewChannel,PermissionFlagsBits.SendMessages,PermissionFlagsBits.AttachFiles,PermissionFlagsBits.EmbedLinks]))return interaction.reply({content:"I need View Channel, Send Messages, Attach Files, and Embed Links there.",flags:MessageFlags.Ephemeral});settings.ticketConfig._transcriptLogChannelId=channel.id;await settings.save();return interaction.reply({content:`Ticket transcripts from the main Discord will now be sent to ${channel} in the staff Discord.`,flags:MessageFlags.Ephemeral});}
   if (subcommand === "edit") {
     const messageId = interaction.options.getString("message-id", true).trim(), config = settings.ticketConfig[interaction.guildId] ||= { enabled: true }; let saved = config.panels?.[messageId];
@@ -226,8 +229,8 @@ export async function handleTicketComponent(interaction, settings) {
   if (!config || config.enabled === false) return interaction.reply({ content: config?.enabled === false ? "New tickets are currently disabled." : "The ticket system has not been configured yet.", flags: MessageFlags.Ephemeral });
   const type = ticketTypes(config).find(entry => entry.id === targetId) || (!targetId ? ticketTypes(config)[0] : null);
   if (!type) return interaction.reply({ content: "That ticket type is no longer available. Please use the newest ticket panel.", flags: MessageFlags.Ephemeral });
-  const openingMember=await interaction.guild.members.fetch(interaction.user.id).catch(()=>null);
-  if(type.restrictedRoleId&&openingMember?.roles.cache.has(type.restrictedRoleId))return interaction.reply({content:`You cannot open this ticket type because you have the restricted <@&${type.restrictedRoleId}> role.`,flags:MessageFlags.Ephemeral,allowedMentions:{parse:[]}});
+  const openingMember=await interaction.guild.members.fetch(interaction.user.id).catch(()=>null),restrictedRoleIds=new Set([...(config.restrictedRoleIds||[]),...(type.restrictedRoleId?[type.restrictedRoleId]:[])]),matchedRestriction=[...restrictedRoleIds].find(roleId=>openingMember?.roles.cache.has(roleId));
+  if(matchedRestriction)return interaction.reply({content:`You cannot open tickets because you have the restricted <@&${matchedRestriction}> role.`,flags:MessageFlags.Ephemeral,allowedMentions:{parse:[]}});
   const questions = type.questions || [];
   if (action === "open" && questions.length) {
     const inputs = questions.map((question, index) => row(new TextInputBuilder().setCustomId(`answer-${index}`).setLabel(`Question ${index + 1}`).setPlaceholder(question).setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000)));
@@ -246,12 +249,12 @@ export async function handleTicketComponent(interaction, settings) {
   try {
     const ticketNumber = nextTicketNumber(settings,interaction.guildId,baseConfig,type);
     const channelName = `${safeName(type.name).slice(0, 85)}-${ticketNumber}`;
-    const permittedIds = new Set([interaction.guild.roles.everyone.id, interaction.user.id, pingRole.id, interaction.client.user.id,...(type.restrictedRoleId?[type.restrictedRoleId]:[])]);
+    const permittedIds = new Set([interaction.guild.roles.everyone.id, interaction.user.id, pingRole.id, interaction.client.user.id,...restrictedRoleIds]);
     const accessOverwrites = [
       { id: interaction.guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
       { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.EmbedLinks] },
-      ...(type.restrictedRoleId===pingRole.id?[]:[{ id: pingRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages] }]),
-      ...(type.restrictedRoleId?[{id:type.restrictedRoleId,deny:[PermissionFlagsBits.ViewChannel]}]:[]),
+      ...(restrictedRoleIds.has(pingRole.id)?[]:[{ id: pingRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages] }]),
+      ...[...restrictedRoleIds].map(roleId=>({id:roleId,deny:[PermissionFlagsBits.ViewChannel]})),
       { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageChannels] }
     ];
     for (const overwrite of category.permissionOverwrites.cache.values()) if (!permittedIds.has(overwrite.id)) accessOverwrites.push({ id: overwrite.id, deny: [PermissionFlagsBits.ViewChannel] });
