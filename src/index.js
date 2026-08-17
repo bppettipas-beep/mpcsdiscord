@@ -7,7 +7,7 @@ import { RadioService } from "./radio-service.js";
 import { teamsCommand, panel as teamsPanel, handleTeams } from "./teams-ui.js";
 import { embedCommand, sayCommand, statsCommand, openEmbed, handleEmbed, say, serverStats } from "./admin-ui.js";
 import { scheduleCommand, panel as schedulePanel, handleSchedule } from "./schedule-ui.js";
-import { ticketCommand, ticketActionCommands, handleTicketCommand, handleTicketComponent, repairTicketNumbers } from "./ticket-ui.js";
+import { ticketCommand, ticketActionCommands, handleTicketCommand, handleTicketComponent, repairTicketNumbers, enforceTicketRestrictionsForMember } from "./ticket-ui.js";
 import { automodCommand, AutoModService } from "./automod-service.js";
 import { logsCommand, AuditLogService } from "./audit-log-service.js";
 import { welcomeCommand, handleWelcomeCommand, welcomeMember } from "./welcome-service.js";
@@ -263,6 +263,7 @@ client.once("clientReady", async () => {
     else await client.application.commands.set([]);
     const savedChannelId = await settings.load();
     await repairTicketNumbers(client,settings);
+    for(const[guildId,config]of Object.entries(settings.ticketConfig))if(guildId!=="_transcriptLogChannelId"&&(config.restrictedRoleIds||[]).length){const guild=await client.guilds.fetch(guildId).catch(()=>null),members=guild?await guild.members.fetch().catch(()=>null):null;if(members)for(const member of members.values())if(config.restrictedRoleIds.some(roleId=>member.roles.cache.has(roleId)))await enforceTicketRestrictionsForMember(member,settings);}
     const initialChannelId = savedChannelId || process.env.DISCORD_CHANNEL_ID;
     if (initialChannelId) await selectDiscordChannel(initialChannelId);
     if (settings.radioChannelId) { const voice = await client.channels.fetch(settings.radioChannelId); if (voice?.isVoiceBased()) await radio.connect(voice); }
@@ -349,7 +350,7 @@ client.on("messageDelete",message=>void auditLogs.messageDelete(message).catch(e
 client.on("messageUpdate",(before,after)=>void auditLogs.messageUpdate(before,after).catch(error=>console.error("Message edit logging failed:",error)));
 client.on("guildMemberAdd",member=>{void auditLogs.memberAdd(member).catch(error=>console.error("Member join logging failed:",error));void welcomeMember(member,settings).catch(error=>console.error(`Could not welcome ${member.user.tag}:`,error.message));const roleId=settings.autoRoles[member.guild.id];if(roleId)void member.roles.add(roleId,"MPCS automatic join role").catch(error=>console.error(`Could not give automatic role ${roleId} to ${member.user.tag}:`,error.message));});
 client.on("guildMemberRemove",member=>void auditLogs.memberRemove(member).catch(error=>console.error("Member leave logging failed:",error)));
-client.on("guildMemberUpdate",(before,after)=>void auditLogs.memberUpdate(before,after).catch(error=>console.error("Member update logging failed:",error)));
+client.on("guildMemberUpdate",(before,after)=>{void auditLogs.memberUpdate(before,after).catch(error=>console.error("Member update logging failed:",error));void enforceTicketRestrictionsForMember(after,settings).catch(error=>console.error("Ticket restriction sync failed:",error));});
 client.on("userUpdate",(before,after)=>void auditLogs.userUpdate(before,after).catch(error=>console.error("User update logging failed:",error)));
 client.on("guildBanAdd",ban=>void auditLogs.banAdd(ban).catch(error=>console.error("Ban logging failed:",error)));
 client.on("guildBanRemove",ban=>void auditLogs.banRemove(ban).catch(error=>console.error("Unban logging failed:",error)));
