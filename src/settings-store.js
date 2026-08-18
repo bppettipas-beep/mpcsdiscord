@@ -1,5 +1,6 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { randomUUID } from "node:crypto";
 
 export class SettingsStore {
   constructor(filePath) {
@@ -22,6 +23,7 @@ export class SettingsStore {
     this.auditLogs = {};
     this.autoRoles = {};
     this.welcomeMessages = {};
+    this.saveQueue = Promise.resolve();
   }
 
   async load() {
@@ -46,9 +48,41 @@ export class SettingsStore {
       this.autoRoles = value.autoRoles && typeof value.autoRoles === "object" ? value.autoRoles : {};
       this.welcomeMessages = value.welcomeMessages && typeof value.welcomeMessages === "object" ? value.welcomeMessages : {};
     } catch (error) {
-      if (error.code !== "ENOENT") throw error;
+      if (error.code === "ENOENT") return this.channelId;
+      // A truncated config must never make the bot continue with empty defaults.
+      // Recover the last known-good snapshot if one is available.
+      try {
+        const backup = JSON.parse(await readFile(`${this.filePath}.bak`, "utf8"));
+        await this.#loadValue(backup);
+        console.error(`Settings file ${this.filePath} was invalid; recovered the last known-good backup.`);
+        await copyFile(`${this.filePath}.bak`, this.filePath);
+        await this.save();
+      } catch (backupError) {
+        throw new Error(`Cannot load persistent settings from ${this.filePath}; refusing to start so ticket data is not overwritten. ${error.message}`);
+      }
     }
     return this.channelId;
+  }
+
+  async #loadValue(value) {
+    this.channelId = typeof value.channelId === "string" ? value.channelId : null;
+    this.pending = value.pending && typeof value.pending === "object" ? value.pending : {};
+    this.links = value.links && typeof value.links === "object" ? value.links : {};
+    this.radioChannelId = typeof value.radioChannelId === "string" ? value.radioChannelId : null;
+    this.radioVolume = Number.isFinite(Number(value.radioVolume)) ? Math.max(0, Math.min(100, Number(value.radioVolume))) : 80;
+    this.teamSnapshot = value.teamSnapshot || { teams: [], players: [] };
+    this.teamActions = Array.isArray(value.teamActions) ? value.teamActions : [];
+    this.teamDrafts = value.teamDrafts && typeof value.teamDrafts === "object" ? value.teamDrafts : {};
+    this.teamSignupDrafts = value.teamSignupDrafts && typeof value.teamSignupDrafts === "object" ? value.teamSignupDrafts : {};
+    this.originalNicknames = value.originalNicknames && typeof value.originalNicknames === "object" ? value.originalNicknames : {};
+    this.teamNicknameOptOut = value.teamNicknameOptOut && typeof value.teamNicknameOptOut === "object" ? value.teamNicknameOptOut : {};
+    this.schedules = Array.isArray(value.schedules) ? value.schedules : [];
+    this.ticketConfig = value.ticketConfig && typeof value.ticketConfig === "object" ? value.ticketConfig : {};
+    this.tickets = value.tickets && typeof value.tickets === "object" ? value.tickets : {};
+    this.automod = value.automod && typeof value.automod === "object" ? value.automod : {};
+    this.auditLogs = value.auditLogs && typeof value.auditLogs === "object" ? value.auditLogs : {};
+    this.autoRoles = value.autoRoles && typeof value.autoRoles === "object" ? value.autoRoles : {};
+    this.welcomeMessages = value.welcomeMessages && typeof value.welcomeMessages === "object" ? value.welcomeMessages : {};
   }
 
   async saveChannel(channelId) {
@@ -57,9 +91,14 @@ export class SettingsStore {
   }
 
   async save() {
-    await mkdir(dirname(this.filePath), { recursive: true });
-    const temporary = `${this.filePath}.tmp`;
-    await writeFile(temporary, JSON.stringify({ channelId: this.channelId, radioChannelId: this.radioChannelId, radioVolume: this.radioVolume, pending: this.pending, links: this.links, teamSnapshot: this.teamSnapshot, teamActions: this.teamActions, teamDrafts: this.teamDrafts, teamSignupDrafts: this.teamSignupDrafts, originalNicknames: this.originalNicknames, teamNicknameOptOut: this.teamNicknameOptOut, schedules: this.schedules, ticketConfig: this.ticketConfig, tickets: this.tickets, automod: this.automod, auditLogs: this.auditLogs, autoRoles: this.autoRoles, welcomeMessages: this.welcomeMessages }, null, 2), "utf8");
-    await rename(temporary, this.filePath);
+    this.saveQueue = this.saveQueue.catch(() => {}).then(async () => {
+      await mkdir(dirname(this.filePath), { recursive: true });
+      const temporary = `${this.filePath}.${process.pid}.${randomUUID()}.tmp`;
+      const value = { channelId: this.channelId, radioChannelId: this.radioChannelId, radioVolume: this.radioVolume, pending: this.pending, links: this.links, teamSnapshot: this.teamSnapshot, teamActions: this.teamActions, teamDrafts: this.teamDrafts, teamSignupDrafts: this.teamSignupDrafts, originalNicknames: this.originalNicknames, teamNicknameOptOut: this.teamNicknameOptOut, schedules: this.schedules, ticketConfig: this.ticketConfig, tickets: this.tickets, automod: this.automod, auditLogs: this.auditLogs, autoRoles: this.autoRoles, welcomeMessages: this.welcomeMessages };
+      await writeFile(temporary, JSON.stringify(value, null, 2), "utf8");
+      try { await copyFile(this.filePath, `${this.filePath}.bak`); } catch (error) { if (error.code !== "ENOENT") throw error; }
+      await rename(temporary, this.filePath);
+    });
+    return this.saveQueue;
   }
 }

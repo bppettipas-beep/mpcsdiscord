@@ -257,13 +257,22 @@ setInterval(() => void flushOutgoing(), 500);
 client.once("clientReady", async () => {
   try {
     console.log("MPCS bot build: railway-radio-native-ffmpeg-v2");
+    let savedChannelId;
+    try {
+      savedChannelId = await settings.load();
+    } catch (error) {
+      console.error(`FATAL: ${error.message}`);
+      console.error("The bot will stop without registering handlers so existing ticket configuration cannot be overwritten.");
+      await client.destroy().catch(() => {});
+      process.exitCode = 1;
+      return;
+    }
     if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON()]);
     const publicCommands=[linkCommand.toJSON(),embedCommand.toJSON(),sayCommand.toJSON(),statsCommand.toJSON(),scheduleCommand.toJSON(),autoRoleCommand.toJSON(),welcomeCommand.toJSON()];
     if (mainGuildId) await (await client.guilds.fetch(mainGuildId)).commands.set([setRadioCommand.toJSON(),radioVolumeCommand.toJSON(),teamsCommand.toJSON(),teamSignupCommand.toJSON(),teamNicknameCommand.toJSON(),ticketCommand.toJSON(),...ticketActionCommands.map(command=>command.toJSON()),automodCommand.toJSON(),...publicCommands]);
     if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON(),ticketCommand.toJSON(),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
     if (!staffGuildId && !mainGuildId) await client.application.commands.set([setChatCommand.toJSON(),setRadioCommand.toJSON(),radioVolumeCommand.toJSON(),teamsCommand.toJSON(),teamSignupCommand.toJSON(),teamNicknameCommand.toJSON(),ticketCommand.toJSON(),...ticketActionCommands.map(command=>command.toJSON()),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
     else await client.application.commands.set([]);
-    const savedChannelId = await settings.load();
     radio.setVolume(settings.radioVolume);
     await repairTicketNumbers(client,settings);
     for(const[guildId,config]of Object.entries(settings.ticketConfig))if(guildId!=="_transcriptLogChannelId"&&(config.restrictedRoleIds||[]).length){const guild=await client.guilds.fetch(guildId).catch(()=>null),members=guild?await guild.members.fetch().catch(()=>null):null;if(members)for(const member of members.values())if(config.restrictedRoleIds.some(roleId=>member.roles.cache.has(roleId)))await enforceTicketRestrictionsForMember(member,settings);}

@@ -24,6 +24,8 @@ Add a Railway volume mounted at `/data`, then use this Discord command from an a
 
 The selected channel is stored in `/data/config.json`, so it survives deployments and restarts. `DISCORD_CHANNEL_ID` remains available as an optional initial fallback.
 
+All ticket panels, ticket restrictions, open-ticket records, team signup drafts, and other bot settings are stored in that same file. The bot writes changes atomically, serializes concurrent saves, and keeps the previous valid file at `/data/config.json.bak`. If the active file is damaged, the bot restores the backup and refuses to start if neither copy is valid, preventing a redeploy from silently replacing ticket configuration with empty defaults. Keep the `/data` volume attached to the service; without persistent storage no application can retain data across a new container.
+
 `/setchat` is registered only in `STAFF_GUILD_ID`. Radio and future public panels are registered in `MAIN_GUILD_ID`. Rank synchronization uses roles from the main server. Invite the same bot to both servers.
 
 Run `/teams` in the main server with **Manage Server** permission to open the private Minecraft team manager. It supports create, edit colors/name, linked-member selection (up to 8), and deletion. Minecraft and Discord synchronize about every 10 seconds.
