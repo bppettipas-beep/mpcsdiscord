@@ -12,6 +12,7 @@ import { automodCommand, AutoModService } from "./automod-service.js";
 import { logsCommand, AuditLogService } from "./audit-log-service.js";
 import { welcomeCommand, handleWelcomeCommand, welcomeMember } from "./welcome-service.js";
 import { teamSignupCommand, signupPanel, handleTeamSignup } from "./team-signup-ui.js";
+import { teamLeaderCommand, openTeamLeader, handleTeamLeader } from "./team-leader-ui.js";
 import { assignJoinRole, handleRoleAllCommand, reconcileAutoRole, roleAllCommand } from "./role-service.js";
 
 const required = ["DISCORD_TOKEN", "BRIDGE_SECRET"];
@@ -193,7 +194,7 @@ const server = createServer((request, response) => {
         return;
       }
       if (request.url === "/teams/sync") {
-        settings.teamSnapshot={teams:Array.isArray(value.teams)?value.teams:[],players:Array.isArray(value.players)?value.players:[]};const validTeams=new Set(settings.teamSnapshot.teams.map(team=>team.id));const removedMatches=settings.schedules.filter(match=>!validTeams.has(match.teamOne)||!validTeams.has(match.teamTwo));settings.schedules=settings.schedules.filter(match=>validTeams.has(match.teamOne)&&validTeams.has(match.teamTwo));removedMatches.forEach(match=>liveMatches.delete(match.id));const actions=settings.teamActions.splice(0,100);
+        settings.teamSnapshot={teams:Array.isArray(value.teams)?value.teams:[],players:Array.isArray(value.players)?value.players:[]};const validTeams=new Set(settings.teamSnapshot.teams.map(team=>team.id));settings.teamLeaderInvites=settings.teamLeaderInvites.filter(invite=>validTeams.has(invite.teamId)&&(!invite.accepted||!settings.teamSnapshot.teams.find(team=>team.id===invite.teamId)?.members?.includes(invite.profile?.uuid)));const removedMatches=settings.schedules.filter(match=>!validTeams.has(match.teamOne)||!validTeams.has(match.teamTwo));settings.schedules=settings.schedules.filter(match=>validTeams.has(match.teamOne)&&validTeams.has(match.teamTwo));removedMatches.forEach(match=>liveMatches.delete(match.id));const actions=settings.teamActions.splice(0,100);
         void reconcileTeamMembers().then(()=>settings.save()).then(()=>{response.writeHead(200,{"Content-Type":"application/json"});response.end(JSON.stringify({actions,linkedUuids:Object.keys(settings.links)}));}).catch(error=>{console.error("Team Discord sync failed:",error);response.writeHead(500).end();});return;
       }
       void handleRankSync(value).then((result) => {
@@ -270,9 +271,9 @@ client.once("clientReady", async () => {
     }
     if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON()]);
     const publicCommands=[linkCommand.toJSON(),embedCommand.toJSON(),sayCommand.toJSON(),statsCommand.toJSON(),scheduleCommand.toJSON(),autoRoleCommand.toJSON(),roleAllCommand.toJSON(),welcomeCommand.toJSON()];
-    if (mainGuildId) await (await client.guilds.fetch(mainGuildId)).commands.set([setRadioCommand.toJSON(),radioVolumeCommand.toJSON(),teamsCommand.toJSON(),teamSignupCommand.toJSON(),teamNicknameCommand.toJSON(),ticketCommand.toJSON(),...ticketActionCommands.map(command=>command.toJSON()),automodCommand.toJSON(),...publicCommands]);
+    if (mainGuildId) await (await client.guilds.fetch(mainGuildId)).commands.set([setRadioCommand.toJSON(),radioVolumeCommand.toJSON(),teamsCommand.toJSON(),teamSignupCommand.toJSON(),teamLeaderCommand.toJSON(),teamNicknameCommand.toJSON(),ticketCommand.toJSON(),...ticketActionCommands.map(command=>command.toJSON()),automodCommand.toJSON(),...publicCommands]);
     if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON(),ticketCommand.toJSON(),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
-    if (!staffGuildId && !mainGuildId) await client.application.commands.set([setChatCommand.toJSON(),setRadioCommand.toJSON(),radioVolumeCommand.toJSON(),teamsCommand.toJSON(),teamSignupCommand.toJSON(),teamNicknameCommand.toJSON(),ticketCommand.toJSON(),...ticketActionCommands.map(command=>command.toJSON()),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
+    if (!staffGuildId && !mainGuildId) await client.application.commands.set([setChatCommand.toJSON(),setRadioCommand.toJSON(),radioVolumeCommand.toJSON(),teamsCommand.toJSON(),teamSignupCommand.toJSON(),teamLeaderCommand.toJSON(),teamNicknameCommand.toJSON(),ticketCommand.toJSON(),...ticketActionCommands.map(command=>command.toJSON()),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
     else await client.application.commands.set([]);
     radio.setVolume(settings.radioVolume);
     await repairTicketNumbers(client,settings);
@@ -334,7 +335,9 @@ client.on("interactionCreate", async (interaction) => {
   if(interaction.isChatInputCommand()&&interaction.commandName==="teams"){if(mainGuildId&&interaction.guildId!==mainGuildId)return void interaction.reply({content:"This command is only available in the main server.",flags:MessageFlags.Ephemeral});return void interaction.reply({...teamsPanel(settings),flags:MessageFlags.Ephemeral});}
   if((interaction.isButton()||interaction.isStringSelectMenu()||interaction.isUserSelectMenu()||interaction.isModalSubmit())&&interaction.customId.startsWith("teams:")){await handleTeams(interaction,settings);return;}
   if(interaction.isChatInputCommand()&&interaction.commandName==="teamsignup"){if(mainGuildId&&interaction.guildId!==mainGuildId)return void interaction.reply({content:"This command is only available in the main server.",flags:MessageFlags.Ephemeral});return void interaction.reply(signupPanel());}
-  if((interaction.isButton()||interaction.isUserSelectMenu()||interaction.isModalSubmit())&&interaction.customId.startsWith("signup:")){await handleTeamSignup(interaction,settings);return;}
+  if((interaction.isButton()||interaction.isStringSelectMenu()||interaction.isUserSelectMenu()||interaction.isModalSubmit())&&interaction.customId.startsWith("signup:")){await handleTeamSignup(interaction,settings);return;}
+  if(interaction.isChatInputCommand()&&interaction.commandName==="teamleader"){if(mainGuildId&&interaction.guildId!==mainGuildId)return void interaction.reply({content:"This command is only available in the main server.",flags:MessageFlags.Ephemeral});return void await openTeamLeader(interaction,settings);}
+  if((interaction.isButton()||interaction.isStringSelectMenu()||interaction.isUserSelectMenu()||interaction.isModalSubmit())&&interaction.customId.startsWith("leader:")){await handleTeamLeader(interaction,settings);return;}
   if (!interaction.isChatInputCommand() || !["setchat", "setradio", "radiovolume"].includes(interaction.commandName)) return;
   if (!interaction.inGuild() || !interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
     await interaction.reply({ content: "You need Manage Server permission to use this command.", flags: MessageFlags.Ephemeral });

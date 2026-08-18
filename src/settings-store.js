@@ -14,6 +14,8 @@ export class SettingsStore {
     this.teamActions = [];
     this.teamDrafts = {};
     this.teamSignupDrafts = {};
+    this.teamLeaderDrafts = {};
+    this.teamLeaderInvites = [];
     this.originalNicknames = {};
     this.teamNicknameOptOut = {};
     this.schedules = [];
@@ -38,6 +40,8 @@ export class SettingsStore {
       this.teamActions = Array.isArray(value.teamActions) ? value.teamActions : [];
       this.teamDrafts = value.teamDrafts && typeof value.teamDrafts === "object" ? value.teamDrafts : {};
       this.teamSignupDrafts = value.teamSignupDrafts && typeof value.teamSignupDrafts === "object" ? value.teamSignupDrafts : {};
+      this.teamLeaderDrafts = value.teamLeaderDrafts && typeof value.teamLeaderDrafts === "object" ? value.teamLeaderDrafts : {};
+      this.teamLeaderInvites = Array.isArray(value.teamLeaderInvites) ? value.teamLeaderInvites : [];
       this.originalNicknames = value.originalNicknames && typeof value.originalNicknames === "object" ? value.originalNicknames : {};
       this.teamNicknameOptOut = value.teamNicknameOptOut && typeof value.teamNicknameOptOut === "object" ? value.teamNicknameOptOut : {};
       this.schedules = Array.isArray(value.schedules) ? value.schedules : [];
@@ -74,6 +78,8 @@ export class SettingsStore {
     this.teamActions = Array.isArray(value.teamActions) ? value.teamActions : [];
     this.teamDrafts = value.teamDrafts && typeof value.teamDrafts === "object" ? value.teamDrafts : {};
     this.teamSignupDrafts = value.teamSignupDrafts && typeof value.teamSignupDrafts === "object" ? value.teamSignupDrafts : {};
+    this.teamLeaderDrafts = value.teamLeaderDrafts && typeof value.teamLeaderDrafts === "object" ? value.teamLeaderDrafts : {};
+    this.teamLeaderInvites = Array.isArray(value.teamLeaderInvites) ? value.teamLeaderInvites : [];
     this.originalNicknames = value.originalNicknames && typeof value.originalNicknames === "object" ? value.originalNicknames : {};
     this.teamNicknameOptOut = value.teamNicknameOptOut && typeof value.teamNicknameOptOut === "object" ? value.teamNicknameOptOut : {};
     this.schedules = Array.isArray(value.schedules) ? value.schedules : [];
@@ -94,7 +100,7 @@ export class SettingsStore {
     this.saveQueue = this.saveQueue.catch(() => {}).then(async () => {
       await mkdir(dirname(this.filePath), { recursive: true });
       const temporary = `${this.filePath}.${process.pid}.${randomUUID()}.tmp`;
-      const value = { channelId: this.channelId, radioChannelId: this.radioChannelId, radioVolume: this.radioVolume, pending: this.pending, links: this.links, teamSnapshot: this.teamSnapshot, teamActions: this.teamActions, teamDrafts: this.teamDrafts, teamSignupDrafts: this.teamSignupDrafts, originalNicknames: this.originalNicknames, teamNicknameOptOut: this.teamNicknameOptOut, schedules: this.schedules, ticketConfig: this.ticketConfig, tickets: this.tickets, automod: this.automod, auditLogs: this.auditLogs, autoRoles: this.autoRoles, welcomeMessages: this.welcomeMessages };
+      const value = { channelId: this.channelId, radioChannelId: this.radioChannelId, radioVolume: this.radioVolume, pending: this.pending, links: this.links, teamSnapshot: this.teamSnapshot, teamActions: this.teamActions, teamDrafts: this.teamDrafts, teamSignupDrafts: this.teamSignupDrafts, teamLeaderDrafts: this.teamLeaderDrafts, teamLeaderInvites: this.teamLeaderInvites, originalNicknames: this.originalNicknames, teamNicknameOptOut: this.teamNicknameOptOut, schedules: this.schedules, ticketConfig: this.ticketConfig, tickets: this.tickets, automod: this.automod, auditLogs: this.auditLogs, autoRoles: this.autoRoles, welcomeMessages: this.welcomeMessages };
       await writeFile(temporary, JSON.stringify(value, null, 2), "utf8");
       try { await copyFile(this.filePath, `${this.filePath}.bak`); } catch (error) { if (error.code !== "ENOENT") throw error; }
       await rename(temporary, this.filePath);
