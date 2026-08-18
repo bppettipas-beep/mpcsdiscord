@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { addRoleReliable, reconcileAutoRole, retry } from "../src/role-service.js";
+import { addRoleReliable, assignJoinRole, reconcileAutoRole, retry } from "../src/role-service.js";
 
 test("retry recovers from transient failures", async () => {
   let calls = 0;
@@ -17,12 +17,15 @@ test("reliable role assignment skips an existing role", async () => {
 });
 
 test("reliable role assignment refetches and retries", async () => {
-  let additions = 0;
-  const current = { roles: { cache: new Map(), add: async () => { additions++; if (additions === 1) throw new Error("temporary"); } } };
-  const member = { id: "member", roles: { cache: new Map() }, guild: { members: { fetch: async () => current } } };
+  let additions = 0,fetches=0;
+  const current = { roles: { cache: new Map(), add: async role=>{additions++;current.roles.cache.set(role,{})} } };
+  const member = { id: "member", roles: { cache: new Map(), add: async () => { additions++; throw new Error("temporary"); } }, guild: { members: { fetch: async () => {fetches++;return current;} } } };
   assert.equal(await addRoleReliable(member, "role", "test", { attempts: 2, sleep: async () => {} }), true);
   assert.equal(additions, 2);
+  assert.equal(fetches,1);
 });
+
+test("join autorole assigns immediately before verification", async()=>{const events=[],cache=new Map(),member={id:"member",roles:{cache,add:async role=>{events.push("add");cache.set(role,{})}},guild:{members:{fetch:async()=>{events.push("verify");return member;}}}};await assignJoinRole(member,"role",{verifyDelay:0,sleep:async()=>events.push("sleep")});assert.equal(events[0],"add");assert.deepEqual(events,["add","sleep","verify"]);});
 
 test("bulk reconciliation verifies repeated passes until nobody is missing", async () => {
   const members=new Map();

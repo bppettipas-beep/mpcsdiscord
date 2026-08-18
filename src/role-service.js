@@ -11,7 +11,7 @@ const pause = milliseconds => new Promise(resolve => setTimeout(resolve, millise
 export async function retry(action, { attempts = 4, delays = [1000, 3000, 8000], sleep = pause } = {}) {
   let lastError;
   for (let attempt = 0; attempt < attempts; attempt++) {
-    try { return await action(); }
+    try { return await action(attempt); }
     catch (error) {
       lastError = error;
       if (attempt + 1 < attempts) await sleep(delays[Math.min(attempt, delays.length - 1)] ?? 1000);
@@ -27,11 +27,18 @@ export function roleIsAssignable(guild, role) {
 
 export async function addRoleReliable(member, roleId, reason, options) {
   if (member.roles.cache.has(roleId)) return false;
-  await retry(async () => {
-    const current = await member.guild.members.fetch(member.id);
+  await retry(async attempt => {
+    const current = attempt === 0 ? member : await member.guild.members.fetch(member.id);
     if (!current.roles.cache.has(roleId)) await current.roles.add(roleId, reason);
   }, options);
   return true;
+}
+
+export async function assignJoinRole(member, roleId, { sleep = pause, verifyDelay = 3000 } = {}) {
+  await addRoleReliable(member, roleId, "MPCS automatic join role", { attempts: 6, delays: [250, 500, 1000, 2000, 4000], sleep });
+  await sleep(verifyDelay);
+  const verified = await member.guild.members.fetch(member.id);
+  if (!verified.roles.cache.has(roleId)) await addRoleReliable(verified, roleId, "MPCS automatic join role verification", { attempts: 6, delays: [250, 500, 1000, 2000, 4000], sleep });
 }
 
 async function runConcurrent(values, concurrency, operation) {
