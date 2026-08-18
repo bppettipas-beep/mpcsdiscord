@@ -1,4 +1,5 @@
 import { ChannelType, MessageFlags, PermissionFlagsBits, SlashCommandBuilder } from "discord.js";
+import { retry } from "./role-service.js";
 
 export const welcomeCommand = new SlashCommandBuilder()
   .setName("welcome")
@@ -34,9 +35,9 @@ async function sendConfigured(member, settings) {
   return channel;
 }
 
-export async function welcomeMember(member, settings) {
+export async function welcomeMember(member, settings, retryOptions) {
   if (!settings.welcomeMessages[member.guild.id]) return;
-  await sendConfigured(member, settings);
+  await retry(() => sendConfigured(member, settings), retryOptions);
 }
 
 export async function handleWelcomeCommand(interaction, settings) {
