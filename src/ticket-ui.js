@@ -84,10 +84,15 @@ export async function repairTicketNumbers(client,settings){let changed=false;con
 async function isTicketStaff(interaction, settings, record) {
   const config = configFor(settings, interaction.guildId), member = await interaction.guild.members.fetch(interaction.user.id);
   if((config?.restrictedRoleIds||[]).some(roleId=>member.roles.cache.has(roleId)))return false;
-  const roleId = record.pingRoleId || config?.supportRoleId;
-  if (!roleId) return false;
-  const requiredRole = interaction.guild.roles.cache.get(roleId) || await interaction.guild.roles.fetch(roleId).catch(() => null);
-  return Boolean(requiredRole && (member.roles.cache.has(roleId) || member.roles.highest.position > requiredRole.position));
+  // Older tickets stored the role selected when they were created. Keep that
+  // role valid, but always include the guild's current support role so a role
+  // configuration change does not strand existing tickets.
+  const roleIds = [...new Set([record?.pingRoleId, config?.supportRoleId].filter(Boolean))];
+  for (const roleId of roleIds) {
+    const requiredRole = interaction.guild.roles.cache.get(roleId) || await interaction.guild.roles.fetch(roleId).catch(() => null);
+    if (requiredRole && (member.roles.cache.has(roleId) || member.roles.highest.position > requiredRole.position)) return true;
+  }
+  return false;
 }
 
 async function applyGlobalTicketRestriction(interaction,settings,role,restricted){const config=settings.ticketConfig[interaction.guildId]||={},otherRestrictions=new Set((config.restrictedRoleIds||[]).filter(id=>id!==role.id)),records=Object.entries(settings.tickets).filter(([key])=>key.startsWith(`${interaction.guildId}:`)).map(([,record])=>record);let updated=0;for(const record of records){const channel=await interaction.guild.channels.fetch(record.channelId).catch(()=>null);if(!channel?.isTextBased())continue;try{if(restricted){await channel.permissionOverwrites.edit(role,{ViewChannel:false},{reason:`Globally restricted from tickets by ${interaction.user.tag}`});const members=await interaction.guild.members.fetch();for(const member of members.values())if(member.roles.cache.has(role.id))await channel.permissionOverwrites.edit(member,{ViewChannel:false},{reason:"Member has a globally restricted ticket role"});}else{if(record.pingRoleId===role.id)await channel.permissionOverwrites.edit(role,{ViewChannel:true,SendMessages:true,ReadMessageHistory:true,ManageMessages:true},{reason:"Global ticket restriction removed"});else await channel.permissionOverwrites.delete(role,"Global ticket restriction removed").catch(()=>{});for(const userId of [record.userId,...(record.addedMembers||[])]){const member=await interaction.guild.members.fetch(userId).catch(()=>null);if(!member||[...otherRestrictions].some(id=>member.roles.cache.has(id)))continue;await channel.permissionOverwrites.edit(member,{ViewChannel:true,SendMessages:true,ReadMessageHistory:true,AttachFiles:true,EmbedLinks:true,AddReactions:true},{reason:"Global ticket restriction removed"});}}updated++;}catch(error){console.error(`Could not update ticket restriction in ${record.channelId}:`,error.message);}}return updated;}
