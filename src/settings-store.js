@@ -19,12 +19,17 @@ export class SettingsStore {
     this.originalNicknames = {};
     this.teamNicknameOptOut = {};
     this.schedules = [];
+    this.matchTicketConfig = {};
+    this.teamLogChannelId = null;
+    this.teamLogDigest = "";
     this.ticketConfig = {};
     this.tickets = {};
     this.automod = {};
     this.auditLogs = {};
     this.autoRoles = {};
     this.welcomeMessages = {};
+    this.signupApprovals = {};
+    this.approvedSignupMessages = {};
     this.saveQueue = Promise.resolve();
   }
 
@@ -45,12 +50,17 @@ export class SettingsStore {
       this.originalNicknames = value.originalNicknames && typeof value.originalNicknames === "object" ? value.originalNicknames : {};
       this.teamNicknameOptOut = value.teamNicknameOptOut && typeof value.teamNicknameOptOut === "object" ? value.teamNicknameOptOut : {};
       this.schedules = Array.isArray(value.schedules) ? value.schedules : [];
+      this.matchTicketConfig = value.matchTicketConfig && typeof value.matchTicketConfig === "object" ? value.matchTicketConfig : {};
+      this.teamLogChannelId = typeof value.teamLogChannelId === "string" ? value.teamLogChannelId : null;
+      this.teamLogDigest = typeof value.teamLogDigest === "string" ? value.teamLogDigest : "";
       this.ticketConfig = value.ticketConfig && typeof value.ticketConfig === "object" ? value.ticketConfig : {};
       this.tickets = value.tickets && typeof value.tickets === "object" ? value.tickets : {};
       this.automod = value.automod && typeof value.automod === "object" ? value.automod : {};
       this.auditLogs = value.auditLogs && typeof value.auditLogs === "object" ? value.auditLogs : {};
       this.autoRoles = value.autoRoles && typeof value.autoRoles === "object" ? value.autoRoles : {};
       this.welcomeMessages = value.welcomeMessages && typeof value.welcomeMessages === "object" ? value.welcomeMessages : {};
+      this.signupApprovals = value.signupApprovals && typeof value.signupApprovals === "object" ? value.signupApprovals : {};
+      this.approvedSignupMessages = value.approvedSignupMessages && typeof value.approvedSignupMessages === "object" ? value.approvedSignupMessages : {};
     } catch (error) {
       if (error.code === "ENOENT") return this.channelId;
       // A truncated config must never make the bot continue with empty defaults.
@@ -83,12 +93,17 @@ export class SettingsStore {
     this.originalNicknames = value.originalNicknames && typeof value.originalNicknames === "object" ? value.originalNicknames : {};
     this.teamNicknameOptOut = value.teamNicknameOptOut && typeof value.teamNicknameOptOut === "object" ? value.teamNicknameOptOut : {};
     this.schedules = Array.isArray(value.schedules) ? value.schedules : [];
+    this.matchTicketConfig = value.matchTicketConfig && typeof value.matchTicketConfig === "object" ? value.matchTicketConfig : {};
+    this.teamLogChannelId = typeof value.teamLogChannelId === "string" ? value.teamLogChannelId : null;
+    this.teamLogDigest = typeof value.teamLogDigest === "string" ? value.teamLogDigest : "";
     this.ticketConfig = value.ticketConfig && typeof value.ticketConfig === "object" ? value.ticketConfig : {};
     this.tickets = value.tickets && typeof value.tickets === "object" ? value.tickets : {};
     this.automod = value.automod && typeof value.automod === "object" ? value.automod : {};
     this.auditLogs = value.auditLogs && typeof value.auditLogs === "object" ? value.auditLogs : {};
     this.autoRoles = value.autoRoles && typeof value.autoRoles === "object" ? value.autoRoles : {};
     this.welcomeMessages = value.welcomeMessages && typeof value.welcomeMessages === "object" ? value.welcomeMessages : {};
+    this.signupApprovals = value.signupApprovals && typeof value.signupApprovals === "object" ? value.signupApprovals : {};
+    this.approvedSignupMessages = value.approvedSignupMessages && typeof value.approvedSignupMessages === "object" ? value.approvedSignupMessages : {};
   }
 
   async saveChannel(channelId) {
@@ -100,7 +115,7 @@ export class SettingsStore {
     this.saveQueue = this.saveQueue.catch(() => {}).then(async () => {
       await mkdir(dirname(this.filePath), { recursive: true });
       const temporary = `${this.filePath}.${process.pid}.${randomUUID()}.tmp`;
-      const value = { channelId: this.channelId, radioChannelId: this.radioChannelId, radioVolume: this.radioVolume, pending: this.pending, links: this.links, teamSnapshot: this.teamSnapshot, teamActions: this.teamActions, teamDrafts: this.teamDrafts, teamSignupDrafts: this.teamSignupDrafts, teamLeaderDrafts: this.teamLeaderDrafts, teamLeaderInvites: this.teamLeaderInvites, originalNicknames: this.originalNicknames, teamNicknameOptOut: this.teamNicknameOptOut, schedules: this.schedules, ticketConfig: this.ticketConfig, tickets: this.tickets, automod: this.automod, auditLogs: this.auditLogs, autoRoles: this.autoRoles, welcomeMessages: this.welcomeMessages };
+      const value = { channelId: this.channelId, radioChannelId: this.radioChannelId, radioVolume: this.radioVolume, pending: this.pending, links: this.links, teamSnapshot: this.teamSnapshot, teamActions: this.teamActions, teamDrafts: this.teamDrafts, teamSignupDrafts: this.teamSignupDrafts, teamLeaderDrafts: this.teamLeaderDrafts, teamLeaderInvites: this.teamLeaderInvites, originalNicknames: this.originalNicknames, teamNicknameOptOut: this.teamNicknameOptOut, schedules: this.schedules, matchTicketConfig: this.matchTicketConfig, teamLogChannelId: this.teamLogChannelId, teamLogDigest: this.teamLogDigest, ticketConfig: this.ticketConfig, tickets: this.tickets, automod: this.automod, auditLogs: this.auditLogs, autoRoles: this.autoRoles, welcomeMessages: this.welcomeMessages, signupApprovals: this.signupApprovals, approvedSignupMessages: this.approvedSignupMessages };
       await writeFile(temporary, JSON.stringify(value, null, 2), "utf8");
       try { await copyFile(this.filePath, `${this.filePath}.bak`); } catch (error) { if (error.code !== "ENOENT") throw error; }
       await rename(temporary, this.filePath);

@@ -14,6 +14,8 @@ import { welcomeCommand, handleWelcomeCommand, welcomeMember } from "./welcome-s
 import { teamSignupCommand, signupPanel, handleTeamSignup } from "./team-signup-ui.js";
 import { teamLeaderCommand, openTeamLeader, handleTeamLeader } from "./team-leader-ui.js";
 import { assignJoinRole, handleRoleAllCommand, reconcileAutoRole, roleAllCommand } from "./role-service.js";
+import { configureTeamLogs, publishTeamLogs, teamLogsCommand } from "./team-log-service.js";
+import { handleSignupApprovalCommand, handleSignupReaction, signupApprovalCommand } from "./signup-approval-service.js";
 
 const required = ["DISCORD_TOKEN", "BRIDGE_SECRET"];
 const missing = required.filter((name) => !process.env[name]);
@@ -22,7 +24,7 @@ if (missing.length) {
   process.exit(1);
 }
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildModeration, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent], partials:[Partials.Message,Partials.Channel,Partials.User,Partials.GuildMember] });
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildModeration, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMessageReactions, GatewayIntentBits.MessageContent], partials:[Partials.Message,Partials.Channel,Partials.Reaction,Partials.User,Partials.GuildMember] });
 const settings = new SettingsStore(process.env.CONFIG_PATH || "/data/config.json");
 const radio = new RadioService(client, process.env.RADIO_STREAM_URL || "https://stream.revma.ihrhls.com/zc185");
 const automod = new AutoModService(client, settings);
@@ -195,7 +197,7 @@ const server = createServer((request, response) => {
       }
       if (request.url === "/teams/sync") {
         settings.teamSnapshot={teams:Array.isArray(value.teams)?value.teams:[],players:Array.isArray(value.players)?value.players:[]};const validTeams=new Set(settings.teamSnapshot.teams.map(team=>team.id));settings.teamLeaderInvites=settings.teamLeaderInvites.filter(invite=>validTeams.has(invite.teamId)&&(!invite.accepted||!settings.teamSnapshot.teams.find(team=>team.id===invite.teamId)?.members?.includes(invite.profile?.uuid)));const removedMatches=settings.schedules.filter(match=>!validTeams.has(match.teamOne)||!validTeams.has(match.teamTwo));settings.schedules=settings.schedules.filter(match=>validTeams.has(match.teamOne)&&validTeams.has(match.teamTwo));removedMatches.forEach(match=>liveMatches.delete(match.id));const actions=settings.teamActions.splice(0,100);
-        void reconcileTeamMembers().then(()=>settings.save()).then(()=>{response.writeHead(200,{"Content-Type":"application/json"});response.end(JSON.stringify({actions,linkedUuids:Object.keys(settings.links)}));}).catch(error=>{console.error("Team Discord sync failed:",error);response.writeHead(500).end();});return;
+        void reconcileTeamMembers().then(()=>publishTeamLogs(client,settings).catch(error=>console.error("Team roster log failed:",error))).then(()=>settings.save()).then(()=>{response.writeHead(200,{"Content-Type":"application/json"});response.end(JSON.stringify({actions,linkedUuids:Object.keys(settings.links)}));}).catch(error=>{console.error("Team Discord sync failed:",error);response.writeHead(500).end();});return;
       }
       void handleRankSync(value).then((result) => {
         response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(result));
@@ -241,12 +243,12 @@ async function reconcileTeamMembers() {
   const assigned = new Map(); for (const team of settings.teamSnapshot.teams || []) for (const uuid of team.members || []) assigned.set(uuid, team);
   for (const [uuid, discordId] of Object.entries(settings.links)) {
     let member; try { member = await guild.members.fetch(discordId); } catch { continue; }
-    const team = assigned.get(uuid), player = (settings.teamSnapshot.players || []).find(entry => entry.uuid === uuid);
+    const team = assigned.get(uuid);
     try {
       if (team) {
         if (!(uuid in settings.originalNicknames)) settings.originalNicknames[uuid] = member.nickname ?? null;
         if (!member.roles.cache.has(teamMemberRoleId)) await member.roles.add(teamMemberRoleId, "MPCS team membership");
-        if(!settings.teamNicknameOptOut[discordId]){const minecraftName = player?.name || "Minecraft", teamPart = team.name.toUpperCase().slice(0, Math.max(1, 32 - minecraftName.length - 3));const nickname = `${teamPart} | ${minecraftName}`;if (member.nickname !== nickname) await member.setNickname(nickname, "MPCS team membership");}
+        if(!settings.teamNicknameOptOut[discordId]){const discordName=member.user.globalName||member.user.username,visibleName=discordName.slice(0,28),teamPart=team.name.toUpperCase().slice(0,Math.max(1,32-visibleName.length-3)),nickname=`${teamPart} | ${visibleName}`;if(member.nickname!==nickname)await member.setNickname(nickname,"MPCS team membership");}
       } else if (uuid in settings.originalNicknames) await removeTeamDiscordState(uuid, discordId);
     } catch (error) { console.error(`Could not synchronize team role/nickname for ${uuid}:`, error); }
   }
@@ -271,9 +273,9 @@ client.once("clientReady", async () => {
     }
     if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON()]);
     const publicCommands=[linkCommand.toJSON(),embedCommand.toJSON(),sayCommand.toJSON(),statsCommand.toJSON(),scheduleCommand.toJSON(),autoRoleCommand.toJSON(),roleAllCommand.toJSON(),welcomeCommand.toJSON()];
-    if (mainGuildId) await (await client.guilds.fetch(mainGuildId)).commands.set([setRadioCommand.toJSON(),radioVolumeCommand.toJSON(),teamsCommand.toJSON(),teamSignupCommand.toJSON(),teamLeaderCommand.toJSON(),teamNicknameCommand.toJSON(),ticketCommand.toJSON(),...ticketActionCommands.map(command=>command.toJSON()),automodCommand.toJSON(),...publicCommands]);
-    if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON(),ticketCommand.toJSON(),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
-    if (!staffGuildId && !mainGuildId) await client.application.commands.set([setChatCommand.toJSON(),setRadioCommand.toJSON(),radioVolumeCommand.toJSON(),teamsCommand.toJSON(),teamSignupCommand.toJSON(),teamLeaderCommand.toJSON(),teamNicknameCommand.toJSON(),ticketCommand.toJSON(),...ticketActionCommands.map(command=>command.toJSON()),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
+    if (mainGuildId) await (await client.guilds.fetch(mainGuildId)).commands.set([setRadioCommand.toJSON(),radioVolumeCommand.toJSON(),teamsCommand.toJSON(),teamSignupCommand.toJSON(),signupApprovalCommand.toJSON(),teamLeaderCommand.toJSON(),teamNicknameCommand.toJSON(),ticketCommand.toJSON(),...ticketActionCommands.map(command=>command.toJSON()),automodCommand.toJSON(),...publicCommands]);
+    if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON(),teamLogsCommand.toJSON(),ticketCommand.toJSON(),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
+    if (!staffGuildId && !mainGuildId) await client.application.commands.set([setChatCommand.toJSON(),setRadioCommand.toJSON(),radioVolumeCommand.toJSON(),teamsCommand.toJSON(),teamSignupCommand.toJSON(),signupApprovalCommand.toJSON(),teamLeaderCommand.toJSON(),teamNicknameCommand.toJSON(),teamLogsCommand.toJSON(),ticketCommand.toJSON(),...ticketActionCommands.map(command=>command.toJSON()),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
     else await client.application.commands.set([]);
     radio.setVolume(settings.radioVolume);
     await repairTicketNumbers(client,settings);
@@ -297,6 +299,7 @@ client.once("clientReady", async () => {
 });
 
 client.on("interactionCreate", async (interaction) => {
+  if(interaction.isChatInputCommand()&&interaction.commandName==="signupapproval"){if(mainGuildId&&interaction.guildId!==mainGuildId)return void interaction.reply({content:"This command is only available in the main server.",flags:MessageFlags.Ephemeral});return void await handleSignupApprovalCommand(interaction,settings);}
   if(interaction.isChatInputCommand()&&["add","close","closerequest"].includes(interaction.commandName)){if(mainGuildId&&interaction.guildId!==mainGuildId)return void interaction.reply({content:"Ticket actions are only available in the main server.",flags:MessageFlags.Ephemeral});return void await handleTicketCommand(interaction,settings);}
   if(interaction.isChatInputCommand()&&interaction.commandName==="welcome")return void await handleWelcomeCommand(interaction,settings);
   if(interaction.isChatInputCommand()&&interaction.commandName==="roleall")return void await handleRoleAllCommand(interaction);
@@ -311,6 +314,7 @@ client.on("interactionCreate", async (interaction) => {
     settings.autoRoles[interaction.guildId]=role.id;await settings.save();return void await interaction.reply({content:`New members will now automatically receive ${role}.`,flags:MessageFlags.Ephemeral,allowedMentions:{parse:[]}});
   }
   if(interaction.isChatInputCommand()&&interaction.commandName==="logs")return void await auditLogs.command(interaction);
+  if(interaction.isChatInputCommand()&&interaction.commandName==="teamlogs"){if(staffGuildId&&interaction.guildId!==staffGuildId)return void interaction.reply({content:"Team logs can only be configured in the staff server.",flags:MessageFlags.Ephemeral});return void await configureTeamLogs(interaction,settings,client);}
   if(interaction.isChatInputCommand()&&interaction.commandName==="automod")return void await automod.command(interaction);
   if(interaction.isChatInputCommand()&&interaction.commandName==="ticket"){const logs=interaction.options.getSubcommand()==="logs";if(logs&&staffGuildId&&interaction.guildId!==staffGuildId)return void interaction.reply({content:"Ticket transcript logs must be configured in the staff server.",flags:MessageFlags.Ephemeral});if(!logs&&mainGuildId&&interaction.guildId!==mainGuildId)return void interaction.reply({content:"Tickets are only available in the main server.",flags:MessageFlags.Ephemeral});return void await handleTicketCommand(interaction,settings);}
   if(interaction.isChatInputCommand()&&interaction.commandName==="teamnickname"){const linked=Object.entries(settings.links).find(([,discordId])=>discordId===interaction.user.id);if(!linked)return void interaction.reply({content:"Your Discord account must be linked to Minecraft first.",flags:MessageFlags.Ephemeral});const[uuid]=linked,member=await interaction.guild.members.fetch(interaction.user.id);if(settings.teamNicknameOptOut[interaction.user.id]){delete settings.teamNicknameOptOut[interaction.user.id];await reconcileTeamMembers();await settings.save();return void interaction.reply({content:"Your automatic team nickname is now enabled.",flags:MessageFlags.Ephemeral});}settings.teamNicknameOptOut[interaction.user.id]=true;const original=settings.originalNicknames[uuid]??null;await member.setNickname(original,"Administrator disabled automatic MPCS team nickname").catch(()=>{});await settings.save();return void interaction.reply({content:"Your automatic team nickname is now disabled. Your team role and membership were kept.",flags:MessageFlags.Ephemeral});}
@@ -326,7 +330,7 @@ client.on("interactionCreate", async (interaction) => {
     settings.links[pending.uuid]=interaction.user.id;delete settings.pending[code];await settings.save();
     await interaction.reply({content:`Linked your Discord account to Minecraft player **${pending.player}**.`,flags:MessageFlags.Ephemeral});return;
   }
-  if(interaction.isChatInputCommand()&&interaction.commandName==="schedule")return void await interaction.reply({...schedulePanel(settings),flags:MessageFlags.Ephemeral});
+  if(interaction.isChatInputCommand()&&interaction.commandName==="schedule"){const category=interaction.options.getChannel("ticket-category"),role=interaction.options.getRole("competitor-role");if(category||role){const current=settings.matchTicketConfig[interaction.guildId]||{};settings.matchTicketConfig[interaction.guildId]={categoryId:category?.id||current.categoryId,competitorRoleId:role?.id||current.competitorRoleId};await settings.save();return void await interaction.reply({...schedulePanel(settings,"Match ticket configuration saved."),flags:MessageFlags.Ephemeral});}return void await interaction.reply({...schedulePanel(settings),flags:MessageFlags.Ephemeral});}
   if((interaction.isButton()||interaction.isStringSelectMenu()||interaction.isModalSubmit())&&interaction.customId.startsWith("schedule:")){await handleSchedule(interaction,settings);return;}
   if(interaction.isChatInputCommand()&&interaction.commandName==="embed")return void await openEmbed(interaction);
   if(interaction.isChatInputCommand()&&interaction.commandName==="say")return void await say(interaction);
@@ -369,6 +373,7 @@ client.on("interactionCreate", async (interaction) => {
 });
 
 client.on("messageCreate", message => void automod.message(message).catch(error => console.error("AutoMod message handling failed:", error)));
+client.on("messageReactionAdd",(reaction,user)=>void handleSignupReaction(reaction,user,settings).catch(error=>console.error("Team signup approval failed:",error)));
 client.on("messageDelete",message=>void auditLogs.messageDelete(message).catch(error=>console.error("Message delete logging failed:",error)));
 client.on("messageUpdate",(before,after)=>void auditLogs.messageUpdate(before,after).catch(error=>console.error("Message edit logging failed:",error)));
 client.on("guildMemberAdd",member=>{void auditLogs.memberAdd(member).catch(error=>console.error("Member join logging failed:",error));void member.guild.members.fetch(member.id).then(full=>welcomeMember(full,settings)).catch(error=>console.error(`Could not welcome ${member.user.tag}:`,error.message));const roleId=settings.autoRoles[member.guild.id];if(roleId)void assignJoinRole(member,roleId).catch(error=>console.error(`Could not give or verify automatic role ${roleId} for ${member.user.tag}:`,error.message));});
