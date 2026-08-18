@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { minecraftProfile, validIgn } from "../src/team-signup-ui.js";
+import { minecraftProfile, signupPanel, validIgn } from "../src/team-signup-ui.js";
+
+test("public panel clearly requires exactly eight members",()=>{
+  const description=signupPanel().embeds[0].data.description;
+  assert.match(description,/EXACTLY 8 MEMBERS/);
+  assert.match(description,/No fewer and no more/);
+});
 
 test("validates Minecraft IGN syntax",()=>{
   assert.equal(validIgn("Valid_Name12"),true);

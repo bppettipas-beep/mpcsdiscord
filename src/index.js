@@ -121,7 +121,7 @@ const server = createServer((request, response) => {
   }
   if (request.method === "GET" && request.url === "/health") {
     response.writeHead(discordChannel ? 200 : 503, { "Content-Type": "application/json" });
-    response.end(JSON.stringify({ ok: Boolean(discordChannel), build: "team-signup-v1" }));
+    response.end(JSON.stringify({ ok: Boolean(discordChannel), build: "team-signup-v2" }));
     return;
   }
   if (request.method !== "POST" || !["/minecraft-chat", "/link/start", "/link/remove", "/rank-sync", "/teams/sync", "/match/status", "/match/result", "/match/reset", "/match/live"].includes(request.url)) {
