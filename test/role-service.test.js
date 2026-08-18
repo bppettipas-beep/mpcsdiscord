@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { addRoleReliable, retry } from "../src/role-service.js";
+import { addRoleReliable, reconcileAutoRole, retry } from "../src/role-service.js";
 
 test("retry recovers from transient failures", async () => {
   let calls = 0;
@@ -22,4 +22,14 @@ test("reliable role assignment refetches and retries", async () => {
   const member = { id: "member", roles: { cache: new Map() }, guild: { members: { fetch: async () => current } } };
   assert.equal(await addRoleReliable(member, "role", "test", { attempts: 2, sleep: async () => {} }), true);
   assert.equal(additions, 2);
+});
+
+test("bulk reconciliation verifies repeated passes until nobody is missing", async () => {
+  const members=new Map();
+  const guild={roles:{fetch:async()=>({id:"role",managed:false,position:1})},members:{me:{permissions:{has:()=>true},roles:{highest:{position:10}}},fetch:async id=>id?members.get(id):members}};
+  for(let index=0;index<30;index++){const id=String(index),cache=new Map(),member={id,user:{tag:`user${index}`},guild,roles:{cache,add:async roleId=>cache.set(roleId,{})}};members.set(id,member);}
+  const result=await reconcileAutoRole(guild,"role",{error:()=>{}},{passes:2,concurrency:12,roleOptions:{attempts:1}});
+  assert.equal(result.failed,0);
+  assert.equal(result.added,30);
+  assert.ok([...members.values()].every(member=>member.roles.cache.has("role")));
 });

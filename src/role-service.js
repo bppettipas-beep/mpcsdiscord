@@ -34,14 +34,30 @@ export async function addRoleReliable(member, roleId, reason, options) {
   return true;
 }
 
-export async function reconcileAutoRole(guild, roleId, logger = console) {
+async function runConcurrent(values, concurrency, operation) {
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+    while (cursor < values.length) await operation(values[cursor++]);
+  });
+  await Promise.all(workers);
+}
+
+export async function reconcileAutoRole(guild, roleId, logger = console, { passes = 4, concurrency = 12, roleOptions } = {}) {
   const role = await guild.roles.fetch(roleId).catch(() => null);
   if (!role || !roleIsAssignable(guild, role)) throw new Error(`Automatic role ${roleId} is missing or cannot be managed by the bot.`);
-  const members = await guild.members.fetch(), missing = [...members.values()].filter(member => !member.roles.cache.has(roleId));
-  let added = 0, failed = 0, cursor = 0;
-  const worker = async () => { while (cursor < missing.length) { const member = missing[cursor++]; try { if (await addRoleReliable(member, roleId, "MPCS automatic role reconciliation")) added++; } catch (error) { failed++; logger.error(`Could not reconcile automatic role for ${member.user.tag}:`, error.message); } } };
-  await Promise.all(Array.from({ length: Math.min(3, missing.length) }, worker));
-  return { total: members.size, alreadyHad: members.size - missing.length, added, failed };
+  const firstMembers = await guild.members.fetch(), initiallyMissing = [...firstMembers.values()].filter(member => !member.roles.cache.has(roleId));
+  const assigned = new Set();
+  for (let pass = 1; pass <= passes; pass++) {
+    const members = pass === 1 ? firstMembers : await guild.members.fetch();
+    const missing = [...members.values()].filter(member => !member.roles.cache.has(roleId));
+    if (!missing.length) break;
+    await runConcurrent(missing, concurrency, async member => {
+      try { if (await addRoleReliable(member, roleId, "MPCS automatic role reconciliation", roleOptions)) assigned.add(member.id); }
+      catch (error) { logger.error(`Role pass ${pass}/${passes} failed for ${member.user.tag}:`, error.message); }
+    });
+  }
+  const verified = await guild.members.fetch(), stillMissing = [...verified.values()].filter(member => !member.roles.cache.has(roleId));
+  return { total: verified.size, alreadyHad: firstMembers.size - initiallyMissing.length, added: assigned.size, failed: stillMissing.length, missingIds: stillMissing.map(member => member.id) };
 }
 
 export async function handleRoleAllCommand(interaction) {
@@ -51,7 +67,8 @@ export async function handleRoleAllCommand(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   try {
     const result = await reconcileAutoRole(interaction.guild, role.id);
-    return interaction.editReply(`Role assignment complete for ${role}: **${result.added} added**, **${result.alreadyHad} already had it**, **${result.failed} failed** out of ${result.total} members.`);
+    if (result.failed) return interaction.editReply(`Role assignment finished for ${role}, but **${result.failed} member(s) are still missing it** after four verified passes. Added: **${result.added}**; already assigned: **${result.alreadyHad}**. Missing IDs: ${result.missingIds.slice(0,25).map(id=>`\`${id}\``).join(", ")}${result.missingIds.length>25?" …":""}`);
+    return interaction.editReply(`Role assignment verified for ${role}: **everyone has it**. Added: **${result.added}**; already assigned: **${result.alreadyHad}**; total members: **${result.total}**.`);
   } catch (error) {
     return interaction.editReply(`Could not complete the role assignment: ${error.message}`);
   }
