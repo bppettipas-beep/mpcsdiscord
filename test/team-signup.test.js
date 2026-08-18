@@ -2,10 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { minecraftProfile, signupPanel, validIgn } from "../src/team-signup-ui.js";
 
-test("public panel clearly requires exactly eight members",()=>{
+test("public panel explains private verified invitations without a minimum roster claim",()=>{
   const description=signupPanel().embeds[0].data.description;
-  assert.match(description,/EXACTLY 8 MEMBERS/);
-  assert.match(description,/No fewer and no more/);
+  assert.match(description,/private invitation/);
+  assert.match(description,/verify their own Minecraft username/);
+  assert.doesNotMatch(description,/exactly 8|minimum|no fewer/i);
 });
 
 test("validates Minecraft IGN syntax",()=>{
