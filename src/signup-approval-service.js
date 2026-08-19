@@ -1,9 +1,10 @@
-import { ChannelType, EmbedBuilder, MessageFlags, PermissionFlagsBits, SlashCommandBuilder } from "discord.js";
-import { randomInt } from "node:crypto";
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, EmbedBuilder, MessageFlags, PermissionFlagsBits, SlashCommandBuilder } from "discord.js";
+import { randomInt, randomUUID } from "node:crypto";
 import { minecraftProfile } from "./team-signup-ui.js";
 
 const COLORS=["#FF5555","#FFAA00","#FFFF55","#55FF55","#00AA00","#55FFFF","#5555FF","#0000AA","#AA00AA","#FF55FF","#FFFFFF","#AAAAAA","#00AAAA","#AA5500"];
 const teamId=name=>name.toLowerCase().replace(/[^a-z0-9_-]/g,"").slice(0,16);
+const pendingDestructive=new Map();
 const TEAM_FORMAT=`Team Name: Your Team Name
 Team Leader: @Discord — IGN
 
@@ -22,6 +23,9 @@ export const signupApprovalCommand=new SlashCommandBuilder().setName("signupappr
   .addSubcommand(command=>command.setName("role").setDescription("Change the role allowed to approve signups")
     .addRoleOption(option=>option.setName("staff-role").setDescription("New approving staff role").setRequired(true)))
   .addSubcommand(command=>command.setName("status").setDescription("Show the current signup approval configuration"))
+  .addSubcommand(command=>command.setName("delete").setDescription("Delete one approval-created team after two confirmations")
+    .addStringOption(option=>option.setName("team").setDescription("Approved team name or ID").setRequired(true)))
+  .addSubcommand(command=>command.setName("wipe").setDescription("Delete every approval-created team after two confirmations"))
   .addSubcommand(command=>command.setName("disable").setDescription("Disable reaction-based signup approvals"));
 export const signupTeamsCommand=new SlashCommandBuilder().setName("signupteams").setDescription("Set where approved signup rosters are posted").setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
   .addChannelOption(option=>option.setName("channel").setDescription("Staff channel that receives approved team rosters").addChannelTypes(ChannelType.GuildText).setRequired(true));
@@ -48,6 +52,17 @@ function gradient(){const first=randomInt(COLORS.length);let second=randomInt(CO
 function existingTeam(settings,signup){return[...(settings.teamSnapshot.teams||[]),...(settings.teamActions||[]).filter(action=>action.type==="create")].find(team=>team.id===signup.id||String(team.name).toLowerCase()===signup.name.toLowerCase());}
 function assignedUuids(settings){return new Set([...(settings.teamSnapshot.teams||[]),...(settings.teamActions||[]).filter(action=>action.type==="create")].flatMap(team=>team.members||[]));}
 const approvalConfig=(settings,guildId)=>settings.signupApprovals?.[guildId];
+const approvalRecords=settings=>Object.entries(settings.approvedSignupMessages||{}).filter(([,record])=>record?.status==="approved"&&record.teamId);
+
+export function removeApprovedSignups(settings,requestedTeamId=null){
+  const records=approvalRecords(settings).filter(([,record])=>!requestedTeamId||record.teamId===requestedTeamId),ids=[...new Set(records.map(([,record])=>record.teamId))];
+  for(const[messageId]of records)delete settings.approvedSignupMessages[messageId];
+  settings.teamActions=(settings.teamActions||[]).filter(action=>!(ids.includes(action.id)&&action.type==="create"));
+  const queuedDeletes=new Set(settings.teamActions.filter(action=>action.type==="delete").map(action=>action.id));for(const id of ids)if(!queuedDeletes.has(id))settings.teamActions.push({type:"delete",id});
+  settings.schedules=(settings.schedules||[]).filter(match=>!ids.includes(match.teamOne)&&!ids.includes(match.teamTwo));return ids;
+}
+function confirmationRow(token,step){return new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`signupapproval:confirm:${step}:${token}`).setLabel(step===1?"Continue to Final Warning":"Permanently Delete").setStyle(ButtonStyle.Danger),new ButtonBuilder().setCustomId(`signupapproval:cancel:${token}`).setLabel("Cancel").setStyle(ButtonStyle.Secondary));}
+function findApprovedTeam(settings,input){const wanted=String(input||"").trim().toLowerCase();return approvalRecords(settings).map(([,record])=>record).find(record=>record.teamId.toLowerCase()===wanted||String(record.preview?.name||"").toLowerCase()===wanted);}
 
 export async function handleSignupTeamsCommand(interaction,settings){
   if(!interaction.inGuild()||!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild))return interaction.reply({content:"You need Manage Server permission.",flags:MessageFlags.Ephemeral});
@@ -67,6 +82,12 @@ export async function enforceSignupMessage(message,settings){
 export async function handleSignupApprovalCommand(interaction,settings){
   if(!interaction.inGuild()||!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild))return interaction.reply({content:"You need Manage Server permission.",flags:MessageFlags.Ephemeral});
   const action=interaction.options.getSubcommand();settings.signupApprovals??={};
+  if(action==="delete"||action==="wipe"){
+    const records=approvalRecords(settings);if(!records.length)return interaction.reply({content:"There are no approval-created teams to delete.",flags:MessageFlags.Ephemeral});
+    const record=action==="delete"?findApprovedTeam(settings,interaction.options.getString("team",true)):null;if(action==="delete"&&!record)return interaction.reply({content:"I could not find an approved team with that name or ID.",flags:MessageFlags.Ephemeral});
+    const token=randomUUID(),teamIds=record?[record.teamId]:[...new Set(records.map(([,value])=>value.teamId))];pendingDestructive.set(token,{userId:interaction.user.id,guildId:interaction.guildId,teamIds,expires:Date.now()+120000});
+    return interaction.reply({content:action==="wipe"?`⚠️ This will delete **all ${teamIds.length} approval-created teams**, their approval records, queued creates, and affected schedules. This is confirmation 1 of 2.`:`⚠️ This will delete **${record.preview?.name||record.teamId}**, its approval record, queued create, and affected schedules. This is confirmation 1 of 2.`,components:[confirmationRow(token,1)],flags:MessageFlags.Ephemeral});
+  }
   if(action==="status"){const config=approvalConfig(settings,interaction.guildId),teamsChannelId=settings.signupApprovals._teamsChannelId;return interaction.reply({content:config?`Signup channel: <#${config.signupChannelId}>\nApproved teams channel: ${teamsChannelId?`<#${teamsChannelId}> (staff server)`:"Not set — run `/signupteams` in the staff server"}\nApproving role: <@&${config.staffRoleId}>`:`Reaction-based signup approval is disabled.`,flags:MessageFlags.Ephemeral,allowedMentions:{parse:[]}});}
   if(action==="disable"){delete settings.signupApprovals[interaction.guildId];await settings.save();return interaction.reply({content:"Reaction-based team signup approval is disabled.",flags:MessageFlags.Ephemeral});}
   if(action==="role"){const config=approvalConfig(settings,interaction.guildId);if(!config)return interaction.reply({content:"Run `/signupapproval setup` first.",flags:MessageFlags.Ephemeral});config.staffRoleId=interaction.options.getRole("staff-role",true).id;await settings.save();return interaction.reply({content:`Only members with <@&${config.staffRoleId}> can now approve team signups with ✅.`,flags:MessageFlags.Ephemeral,allowedMentions:{parse:[]}});}
@@ -75,6 +96,16 @@ export async function handleSignupApprovalCommand(interaction,settings){
   settings.signupApprovals[interaction.guildId]={signupChannelId:signupChannel.id,staffRoleId:role.id};await settings.save();
   const guide=await signupChannel.send(signupGuide());
   return interaction.reply({content:`Configured ${signupChannel} for signups. Members with ${role} can approve using ✅. Approved rosters use the channel selected with \`/signupteams\` in the staff server. I posted the exact signup instructions here: ${guide.url}`,flags:MessageFlags.Ephemeral,allowedMentions:{parse:[]}});
+}
+
+export async function handleSignupApprovalComponent(interaction,settings){
+  if(!interaction.isButton()||!interaction.customId.startsWith("signupapproval:"))return false;const[,action,value,possibleToken]=interaction.customId.split(":"),token=action==="confirm"?possibleToken:value,pending=pendingDestructive.get(token);
+  if(!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)){await interaction.reply({content:"You need Manage Server permission to confirm deletions.",flags:MessageFlags.Ephemeral});return true;}
+  if(!pending||pending.expires<Date.now()){pendingDestructive.delete(token);await interaction.update({content:"This deletion confirmation expired. Run the command again.",components:[]});return true;}
+  if(interaction.user.id!==pending.userId||interaction.guildId!==pending.guildId){await interaction.reply({content:"Only the administrator who started this deletion can confirm it.",flags:MessageFlags.Ephemeral});return true;}
+  if(action==="cancel"){pendingDestructive.delete(token);await interaction.update({content:"Deletion cancelled. Nothing was changed.",components:[]});return true;}
+  if(value==="1"){await interaction.update({content:`🚨 **FINAL WARNING:** This will permanently remove ${pending.teamIds.length} approval-created team${pending.teamIds.length===1?"":"s"} from the bot and queue their deletion in Minecraft. Confirmation 2 of 2.`,components:[confirmationRow(token,2)]});return true;}
+  const removed=pending.teamIds.flatMap(id=>removeApprovedSignups(settings,id));pendingDestructive.delete(token);await settings.save();await interaction.update({content:`✅ Deleted ${removed.length} approval-created team${removed.length===1?"":"s"}: ${removed.map(id=>`\`${id}\``).join(", ")}. Minecraft will apply the queued deletions on its next sync.`,components:[]});return true;
 }
 
 export async function handleSignupReaction(reaction,user,settings){

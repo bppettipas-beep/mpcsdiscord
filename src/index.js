@@ -15,7 +15,7 @@ import { teamSignupCommand, signupPanel, handleTeamSignup } from "./team-signup-
 import { teamLeaderCommand, openTeamLeader, handleTeamLeader } from "./team-leader-ui.js";
 import { assignJoinRole, handleRoleAllCommand, reconcileAutoRole, roleAllCommand } from "./role-service.js";
 import { configureTeamLogs, publishTeamLogs, teamLogsCommand } from "./team-log-service.js";
-import { enforceSignupMessage, handleSignupApprovalCommand, handleSignupReaction, handleSignupTeamsCommand, signupApprovalCommand, signupTeamsCommand } from "./signup-approval-service.js";
+import { enforceSignupMessage, handleSignupApprovalCommand, handleSignupApprovalComponent, handleSignupReaction, handleSignupTeamsCommand, signupApprovalCommand, signupTeamsCommand } from "./signup-approval-service.js";
 
 const required = ["DISCORD_TOKEN", "BRIDGE_SECRET"];
 const missing = required.filter((name) => !process.env[name]);
@@ -348,6 +348,7 @@ client.on("interactionCreate", async (interaction) => {
   if((interaction.isButton()||interaction.isStringSelectMenu()||interaction.isUserSelectMenu()||interaction.isModalSubmit())&&interaction.customId.startsWith("teams:")){await handleTeams(interaction,settings);return;}
   if(interaction.isChatInputCommand()&&interaction.commandName==="teamsignup"){if(mainGuildId&&interaction.guildId!==mainGuildId)return void interaction.reply({content:"This command is only available in the main server.",flags:MessageFlags.Ephemeral});return void interaction.reply(signupPanel());}
   if((interaction.isButton()||interaction.isStringSelectMenu()||interaction.isUserSelectMenu()||interaction.isModalSubmit())&&interaction.customId.startsWith("signup:")){await handleTeamSignup(interaction,settings);return;}
+  if(interaction.isButton()&&interaction.customId.startsWith("signupapproval:")){await handleSignupApprovalComponent(interaction,settings);return;}
   if(interaction.isChatInputCommand()&&interaction.commandName==="teamleader"){if(mainGuildId&&interaction.guildId!==mainGuildId)return void interaction.reply({content:"This command is only available in the main server.",flags:MessageFlags.Ephemeral});return void await openTeamLeader(interaction,settings);}
   if((interaction.isButton()||interaction.isStringSelectMenu()||interaction.isUserSelectMenu()||interaction.isModalSubmit())&&interaction.customId.startsWith("leader:")){await handleTeamLeader(interaction,settings);return;}
   if (!interaction.isChatInputCommand() || !["setchat", "setradio", "radiovolume"].includes(interaction.commandName)) return;

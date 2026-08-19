@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { minecraftProfile, signupPanel, validIgn } from "../src/team-signup-ui.js";
-import { parseSignup } from "../src/signup-approval-service.js";
+import { parseSignup, removeApprovedSignups } from "../src/signup-approval-service.js";
 
 test("public panel explains private verified invitations without a minimum roster claim",()=>{
   const description=signupPanel().embeds[0].data.description;
@@ -40,4 +40,12 @@ test("requires every signup roster slot",()=>{
 
 test("rejects duplicate Discord members in approved signup messages",()=>{
   assert.throws(()=>parseSignup(`Team Name: Dupes\nTeam Leader: <@12345678901234567> — LeaderIGN\nPlayer 2: <@12345678901234567> — OtherIGN\nPlayer 3: <@32345678901234567> — ThirdIGN\nPlayer 4: <@42345678901234567> — FourthIGN\nPlayer 5: <@52345678901234567> — FifthIGN\nPlayer 6: <@62345678901234567> — SixthIGN\nPlayer 7: <@72345678901234567> — SeventhIGN\nSubstitute: <@82345678901234567> — SubIGN`),/only appear once/);
+});
+
+test("deletes one approved signup without touching other approved teams",()=>{
+  const settings={approvedSignupMessages:{one:{status:"approved",teamId:"alpha"},two:{status:"approved",teamId:"beta"}},teamActions:[{type:"create",id:"alpha"},{type:"create",id:"beta"}],schedules:[{teamOne:"alpha",teamTwo:"beta"},{teamOne:"beta",teamTwo:"gamma"}]};
+  assert.deepEqual(removeApprovedSignups(settings,"alpha"),["alpha"]);
+  assert.equal(settings.approvedSignupMessages.one,undefined);assert.ok(settings.approvedSignupMessages.two);
+  assert.deepEqual(settings.teamActions,[{type:"create",id:"beta"},{type:"delete",id:"alpha"}]);
+  assert.deepEqual(settings.schedules,[{teamOne:"beta",teamTwo:"gamma"}]);
 });
