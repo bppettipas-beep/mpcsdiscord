@@ -104,16 +104,23 @@ async function flushOutgoing() {
 }
 
 const server = createServer((request, response) => {
-  if (request.method === "OPTIONS" && (request.url === "/api/schedule" || request.url.startsWith("/api/live/"))) {
+  if (request.method === "OPTIONS" && (request.url === "/api/schedule" || request.url === "/api/live" || request.url.startsWith("/api/live/"))) {
     response.writeHead(204, { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, OPTIONS", "Access-Control-Allow-Headers": "Accept, Cache-Control, Content-Type" }).end();
     return;
   }
+  if (request.method === "GET" && request.url === "/api/live") {
+    const now=Date.now();
+    for(const [id,live] of liveMatches)if(now-live.updatedAt>15000)liveMatches.delete(id);
+    const games=[...liveMatches.values()].sort((a,b)=>b.updatedAt-a.updatedAt);
+    response.writeHead(200,{"Content-Type":"application/json","Cache-Control":"no-store, no-cache, must-revalidate","Pragma":"no-cache","Access-Control-Allow-Origin":"*"});response.end(JSON.stringify({games,updatedAt:new Date().toISOString()}));return;
+  }
   if (request.method === "GET" && request.url === "/api/schedule") {
-    const teamNames = new Map((settings.teamSnapshot.teams || []).map(team => [team.id, team.name]));
+    const syncedTeams=settings.teamSnapshot.teams||[],syncedIds=new Set(syncedTeams.map(team=>team.id)),approvedPreviews=Object.values(settings.approvedSignupMessages||{}).filter(record=>record?.status==="approved"&&record.preview&&!syncedIds.has(record.preview.id)&&Date.now()-record.at<600000).map(record=>record.preview),sourceTeams=[...syncedTeams,...approvedPreviews];
+    const teamNames = new Map(sourceTeams.map(team => [team.id, team.name]));
     const matches = settings.schedules.map(match => ({ ...match, teamOneName: match.teamOneName || teamNames.get(match.teamOne) || null, teamTwoName: match.teamTwoName || teamNames.get(match.teamTwo) || null, watchReady: match.status === "LIVE" && liveMatches.get(match.id)?.watchReady === true }));
     const uuidPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     const playerNames = new Map((settings.teamSnapshot.players || []).map(player => [player.uuid,typeof player.name==="string"&&!uuidPattern.test(player.name)?player.name:null]));
-    const teams = (settings.teamSnapshot.teams || []).map(team => ({ id: team.id, name: team.name || null, tag: team.tag || null, type: team.type || null, players: (team.members || []).map(member => {const uuid=typeof member==="string"?member:member?.uuid;const supplied=typeof member==="object"&&typeof member?.name==="string"&&!uuidPattern.test(member.name)?member.name:null;return{uuid,name:supplied||playerNames.get(uuid)||null};}) }));
+    const teams = sourceTeams.map(team => ({ id: team.id, name: team.name || null, tag: team.tag || null, type: team.type || null, players: (team.members || []).map(member => {const uuid=typeof member==="string"?member:member?.uuid;const supplied=typeof member==="object"&&typeof member?.name==="string"&&!uuidPattern.test(member.name)?member.name:null;return{uuid,name:supplied||team.playerNames?.[uuid]||playerNames.get(uuid)||null};}) }));
     response.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache", "Expires": "0", "Access-Control-Allow-Origin": "*" });
     response.end(JSON.stringify({ matches, teams, modes: ["Crystal", "Sword", "Ultra Hardcore", "Cart", "Spear Mace", "Pot", "Diamond SMP"], updatedAt: new Date().toISOString() }));
     return;
@@ -151,7 +158,7 @@ const server = createServer((request, response) => {
         if(typeof value.matchId!=="string"||!["LIVE","ENDED"].includes(value.status)||!Array.isArray(value.players)){response.writeHead(400).end();return;}
         if(value.status==="ENDED"){liveMatches.delete(value.matchId);response.writeHead(204).end();return;}
         const previous=liveMatches.get(value.matchId),events=previous?.events||[];if(value.event){events.unshift(value.event);if(events.length>30)events.length=30;}
-        liveMatches.set(value.matchId,{matchId:value.matchId,status:"LIVE",watchReady:value.watchReady===true,mode:"Sword",round:Number(value.round)||1,scoreOne:Number(value.scoreOne)||0,scoreTwo:Number(value.scoreTwo)||0,players:value.players.slice(0,2),events,updatedAt:Date.now()});response.writeHead(202).end();return;
+        liveMatches.set(value.matchId,{matchId:value.matchId,status:"LIVE",watchReady:value.watchReady===true,mode:typeof value.mode==="string"&&value.mode.trim()?value.mode.trim():"Unknown",round:Number(value.round)||1,scoreOne:Number(value.scoreOne)||0,scoreTwo:Number(value.scoreTwo)||0,players:value.players.slice(0,2),events,updatedAt:Date.now()});response.writeHead(202).end();return;
       }
       if (request.url === "/match/status" || request.url === "/match/result" || request.url === "/match/reset") {
         const match=settings.schedules.find(entry=>entry.id===value.matchId);if(!match){response.writeHead(404).end();return;}
