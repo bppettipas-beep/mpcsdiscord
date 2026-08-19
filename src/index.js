@@ -16,6 +16,7 @@ import { teamLeaderCommand, openTeamLeader, handleTeamLeader } from "./team-lead
 import { assignJoinRole, handleRoleAllCommand, reconcileAutoRole, roleAllCommand } from "./role-service.js";
 import { configureTeamLogs, publishTeamLogs, teamLogsCommand } from "./team-log-service.js";
 import { enforceSignupMessage, handleSignupApprovalCommand, handleSignupApprovalComponent, handleSignupReaction, handleSignupTeamsCommand, signupApprovalCommand, signupTeamsCommand } from "./signup-approval-service.js";
+import { MinecraftNameResolver } from "./minecraft-name-resolver.js";
 
 const required = ["DISCORD_TOKEN", "BRIDGE_SECRET"];
 const missing = required.filter((name) => !process.env[name]);
@@ -34,6 +35,7 @@ const auditLogs = new AuditLogService(client,settings,mainGuildId,staffGuildId);
 const teamMemberRoleId = process.env.TEAM_MEMBER_ROLE_ID || "1537632587260887150";
 const outgoing = [];
 const liveMatches = new Map();
+const minecraftNames=new MinecraftNameResolver();
 let discordChannel;
 let flushing = false;
 
@@ -103,7 +105,7 @@ async function flushOutgoing() {
   }
 }
 
-const server = createServer((request, response) => {
+const server = createServer(async(request, response) => {
   if (request.method === "OPTIONS" && (request.url === "/api/schedule" || request.url === "/api/live" || request.url.startsWith("/api/live/"))) {
     response.writeHead(204, { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, OPTIONS", "Access-Control-Allow-Headers": "Accept, Cache-Control, Content-Type" }).end();
     return;
@@ -120,6 +122,7 @@ const server = createServer((request, response) => {
     const matches = settings.schedules.map(match => ({ ...match, teamOneName: match.teamOneName || teamNames.get(match.teamOne) || null, teamTwoName: match.teamTwoName || teamNames.get(match.teamTwo) || null, watchReady: match.status === "LIVE" && liveMatches.get(match.id)?.watchReady === true }));
     const uuidPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     const playerNames = new Map((settings.teamSnapshot.players || []).map(player => [player.uuid,typeof player.name==="string"&&!uuidPattern.test(player.name)?player.name:null]));
+    await minecraftNames.fill(playerNames,sourceTeams.flatMap(team=>(team.members||[]).map(member=>typeof member==="string"?member:member?.uuid)));
     const teams = sourceTeams.map(team => ({ id: team.id, name: team.name || null, tag: team.tag || null, type: team.type || null, players: (team.members || []).map(member => {const uuid=typeof member==="string"?member:member?.uuid;const supplied=typeof member==="object"&&typeof member?.name==="string"&&!uuidPattern.test(member.name)?member.name:null;return{uuid,name:supplied||team.playerNames?.[uuid]||playerNames.get(uuid)||null};}) }));
     response.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache", "Expires": "0", "Access-Control-Allow-Origin": "*" });
     response.end(JSON.stringify({ matches, teams, modes: ["Crystal", "Sword", "Ultra Hardcore", "Cart", "Spear Mace", "Pot", "Diamond SMP"], updatedAt: new Date().toISOString() }));
