@@ -17,7 +17,7 @@ import { assignJoinRole, handleRoleAllCommand, reconcileAutoRole, roleAllCommand
 import { configureTeamLogs, publishTeamLogs, teamLogsCommand } from "./team-log-service.js";
 import { enforceSignupMessage, handleSignupApprovalCommand, handleSignupApprovalComponent, handleSignupReaction, handleSignupTeamsCommand, signupApprovalCommand, signupTeamsCommand } from "./signup-approval-service.js";
 import { MinecraftNameResolver } from "./minecraft-name-resolver.js";
-import { websiteTeams } from "./team-source.js";
+import { discordTeamAssignments, websiteTeams } from "./team-source.js";
 
 const required = ["DISCORD_TOKEN", "BRIDGE_SECRET"];
 const missing = required.filter((name) => !process.env[name]);
@@ -250,19 +250,18 @@ async function removeTeamDiscordState(uuid, discordId) {
 }
 
 async function reconcileTeamMembers() {
-  const guild = mainGuildId ? await client.guilds.fetch(mainGuildId) : null; if (!guild) return;
-  const assigned = new Map(); for (const team of settings.teamSnapshot.teams || []) for (const uuid of team.members || []) assigned.set(uuid, team);
-  for (const [uuid, discordId] of Object.entries(settings.links)) {
-    let member; try { member = await guild.members.fetch(discordId); } catch { continue; }
-    const team = assigned.get(uuid);
+  const guild=mainGuildId?await client.guilds.fetch(mainGuildId):null;if(!guild)return{assigned:0,roleAdded:0,nicknameChanged:0,failed:0};const members=await guild.members.fetch(),assignments=discordTeamAssignments(settings),linkedByDiscord=new Map();for(const[uuid,discordId]of Object.entries(settings.links))if(!linkedByDiscord.has(discordId))linkedByDiscord.set(discordId,uuid);let roleAdded=0,nicknameChanged=0,failed=0,settingsChanged=false;
+  for(const [discordId,uuidFallback] of linkedByDiscord) {
+    const assignment=assignments.get(discordId),uuid=assignment?.uuid||uuidFallback,team=assignment?.team,member=members.get(discordId);if(!member)continue;
     try {
       if (team) {
-        if (!(uuid in settings.originalNicknames)) settings.originalNicknames[uuid] = member.nickname ?? null;
-        if (!member.roles.cache.has(teamMemberRoleId)) await member.roles.add(teamMemberRoleId, "MPCS team membership");
-        if(!settings.teamNicknameOptOut[discordId]){const discordName=member.user.globalName||member.user.username,visibleName=discordName.slice(0,28),teamPart=team.name.toUpperCase().slice(0,Math.max(1,32-visibleName.length-3)),nickname=`${teamPart} | ${visibleName}`;if(member.nickname!==nickname)await member.setNickname(nickname,"MPCS team membership");}
-      } else if (uuid in settings.originalNicknames) await removeTeamDiscordState(uuid, discordId);
-    } catch (error) { console.error(`Could not synchronize team role/nickname for ${uuid}:`, error); }
+        if (!(uuid in settings.originalNicknames)){settings.originalNicknames[uuid]=member.nickname??null;settingsChanged=true;}
+        if (!member.roles.cache.has(teamMemberRoleId)){await member.roles.add(teamMemberRoleId,"MPCS team membership");roleAdded++;}
+        if(!settings.teamNicknameOptOut[discordId]){const discordName=member.user.globalName||member.user.username,visibleName=discordName.slice(0,28),teamPart=String(team.name||team.id).toUpperCase().slice(0,Math.max(1,32-visibleName.length-3)),nickname=`${teamPart} | ${visibleName}`;if(member.nickname!==nickname){await member.setNickname(nickname,"MPCS team membership");nicknameChanged++;}}
+      } else {const storedUuid=Object.keys(settings.originalNicknames).find(id=>settings.links[id]===discordId);if(storedUuid){await removeTeamDiscordState(storedUuid,discordId);settingsChanged=true;}}
+    } catch (error) {failed++;console.error(`Could not synchronize team role/nickname for ${uuid}:`,error);}
   }
+  if(settingsChanged)await settings.save();return{assigned:assignments.size,roleAdded,nicknameChanged,failed};
 }
 
 const port = Number(process.env.PORT) || 3000;
@@ -293,6 +292,7 @@ client.once("clientReady", async () => {
     const reconcileConfiguredAutoRoles=async()=>{for(const[guildId,roleId]of Object.entries(settings.autoRoles)){const guild=await client.guilds.fetch(guildId).catch(()=>null);if(guild)void reconcileAutoRole(guild,roleId).then(result=>console.log(`Autorole reconciliation in ${guild.name}: ${result.added} added, ${result.alreadyHad} already assigned, ${result.failed} failed.`)).catch(error=>console.error(`Autorole reconciliation failed in ${guild.name}:`,error.message));}};
     await reconcileConfiguredAutoRoles();
     const autoRoleRepairTimer=setInterval(()=>void reconcileConfiguredAutoRoles(),300_000);autoRoleRepairTimer.unref();
+    const initialTeamSync=await reconcileTeamMembers();console.log(`Team reconciliation: ${initialTeamSync.assigned} assigned, ${initialTeamSync.roleAdded} roles added, ${initialTeamSync.nicknameChanged} nicknames fixed, ${initialTeamSync.failed} failed.`);const teamRepairTimer=setInterval(()=>void reconcileTeamMembers().then(result=>{if(result.roleAdded||result.nicknameChanged||result.failed)console.log(`Team reconciliation: ${result.assigned} assigned, ${result.roleAdded} roles added, ${result.nicknameChanged} nicknames fixed, ${result.failed} failed.`);}).catch(error=>console.error("Team reconciliation failed:",error.message)),60_000);teamRepairTimer.unref();
     for(const[guildId,config]of Object.entries(settings.ticketConfig))if(guildId!=="_transcriptLogChannelId"&&(config.restrictedRoleIds||[]).length){const guild=await client.guilds.fetch(guildId).catch(()=>null),members=guild?await guild.members.fetch().catch(()=>null):null;if(members)for(const member of members.values())if(config.restrictedRoleIds.some(roleId=>member.roles.cache.has(roleId)))await enforceTicketRestrictionsForMember(member,settings);}
     const initialChannelId = savedChannelId || process.env.DISCORD_CHANNEL_ID;
     if (initialChannelId) await selectDiscordChannel(initialChannelId);

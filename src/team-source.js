@@ -6,3 +6,5 @@ export function websiteTeams(settings){
   for(const team of [...previews,...queued])if(team?.id&&!deleted.has(team.id)&&!teams.has(team.id))teams.set(team.id,team);
   return[...teams.values()];
 }
+
+export function discordTeamAssignments(settings){const assignments=new Map();for(const team of websiteTeams(settings))for(const uuid of team.members||[]){const discordId=settings.links?.[uuid];if(discordId&&!assignments.has(discordId))assignments.set(discordId,{uuid,team});}return assignments;}
