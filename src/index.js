@@ -17,6 +17,7 @@ import { assignJoinRole, handleRoleAllCommand, reconcileAutoRole, roleAllCommand
 import { configureTeamLogs, publishTeamLogs, teamLogsCommand } from "./team-log-service.js";
 import { enforceSignupMessage, handleSignupApprovalCommand, handleSignupApprovalComponent, handleSignupReaction, handleSignupTeamsCommand, signupApprovalCommand, signupTeamsCommand } from "./signup-approval-service.js";
 import { MinecraftNameResolver } from "./minecraft-name-resolver.js";
+import { websiteTeams } from "./team-source.js";
 
 const required = ["DISCORD_TOKEN", "BRIDGE_SECRET"];
 const missing = required.filter((name) => !process.env[name]);
@@ -117,7 +118,7 @@ const server = createServer(async(request, response) => {
     response.writeHead(200,{"Content-Type":"application/json","Cache-Control":"no-store, no-cache, must-revalidate","Pragma":"no-cache","Access-Control-Allow-Origin":"*"});response.end(JSON.stringify({games,updatedAt:new Date().toISOString()}));return;
   }
   if (request.method === "GET" && request.url === "/api/schedule") {
-    const syncedTeams=settings.teamSnapshot.teams||[],syncedIds=new Set(syncedTeams.map(team=>team.id)),approvedPreviews=Object.values(settings.approvedSignupMessages||{}).filter(record=>record?.status==="approved"&&record.preview&&!syncedIds.has(record.preview.id)&&Date.now()-record.at<600000).map(record=>record.preview),sourceTeams=[...syncedTeams,...approvedPreviews];
+    const sourceTeams=websiteTeams(settings);
     const teamNames = new Map(sourceTeams.map(team => [team.id, team.name]));
     const matches = settings.schedules.map(match => ({ ...match, teamOneName: match.teamOneName || teamNames.get(match.teamOne) || null, teamTwoName: match.teamTwoName || teamNames.get(match.teamTwo) || null, watchReady: match.status === "LIVE" && liveMatches.get(match.id)?.watchReady === true }));
     const uuidPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
