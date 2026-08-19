@@ -26,13 +26,14 @@ test("rejects Minecraft names Mojang cannot find",async()=>{
   await assert.rejects(()=>minecraftProfile("MissingName",async()=>({ok:false,status:404})),/could not find/);
 });
 
-test("parses a staff-approved signup message",()=>{
-  const signup=parseSignup(`Team name: Sky Kings\nTeam Leader: <@12345678901234567> LeaderIGN\n\nPlayer2: <@22345678901234567> Player_Two\nPlayer3: <@32345678901234567> ThirdIGN`);
+test("parses a gamemode-based staff-approved signup message",()=>{
+  const signup=parseSignup(`Team name: Sky Kings\nTeam Leader: <@12345678901234567>\n\nVanilla: <@12345678901234567> LeaderIGN\nSpear Mace: <@22345678901234567> Player_Two\nSub: <@32345678901234567> ThirdIGN`);
   assert.equal(signup.id,"skykings");
   assert.equal(signup.leader.discordId,"12345678901234567");
   assert.deepEqual(signup.roster.map(member=>member.ign),["LeaderIGN","Player_Two","ThirdIGN"]);
+  assert.deepEqual(signup.roster.map(member=>member.role),["Vanilla","Spear Mace","Sub"]);
 });
 
 test("rejects duplicate Discord members in approved signup messages",()=>{
-  assert.throws(()=>parseSignup(`Team name: Dupes\nTeam Leader: <@12345678901234567> LeaderIGN\nPlayer2: <@12345678901234567> OtherIGN`),/only appear once/);
+  assert.throws(()=>parseSignup(`Team name: Dupes\nTeam Leader: <@12345678901234567>\nVanilla: <@12345678901234567> LeaderIGN\nSub: <@12345678901234567> OtherIGN`),/only appear once/);
 });
