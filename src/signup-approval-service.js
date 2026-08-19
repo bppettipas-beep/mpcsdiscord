@@ -1,20 +1,20 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, EmbedBuilder, MessageFlags, PermissionFlagsBits, SlashCommandBuilder } from "discord.js";
 import { randomInt, randomUUID } from "node:crypto";
-import { minecraftProfile } from "./team-signup-ui.js";
+import { minecraftProfile, validMinecraftIdentifier } from "./team-signup-ui.js";
 
 const COLORS=["#FF5555","#FFAA00","#FFFF55","#55FF55","#00AA00","#55FFFF","#5555FF","#0000AA","#AA00AA","#FF55FF","#FFFFFF","#AAAAAA","#00AAAA","#AA5500"];
 const teamId=name=>name.toLowerCase().replace(/[^a-z0-9_-]/g,"").slice(0,16);
 const pendingDestructive=new Map();
 const TEAM_FORMAT=`Team Name: Your Team Name
-Team Leader: @Discord IGN
+Team Leader: @Discord Username-or-UUID
 
-Player 2: @Discord IGN
-Player 3: @Discord IGN
-Player 4: @Discord IGN
-Player 5: @Discord IGN
-Player 6: @Discord IGN
-Player 7: @Discord IGN
-Substitute: @Discord IGN`;
+Player 2: @Discord Username-or-UUID
+Player 3: @Discord Username-or-UUID
+Player 4: @Discord Username-or-UUID
+Player 5: @Discord Username-or-UUID
+Player 6: @Discord Username-or-UUID
+Player 7: @Discord Username-or-UUID
+Substitute: @Discord Username-or-UUID`;
 
 export const signupApprovalCommand=new SlashCommandBuilder().setName("signupapproval").setDescription("Configure staff-approved team signup messages").setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
   .addSubcommand(command=>command.setName("setup").setDescription("Set the signup channel and approving role")
@@ -35,15 +35,15 @@ export function parseSignup(content){
   let name=null,leader=null;const players=[],labels=new Set();
   for(const line of lines){
     let match=line.match(/^team\s*name\s*:\s*(.+)$/i);if(match){if(name)throw new Error("Include exactly one `Team name:` line.");name=match[1].trim();continue;}
-    match=line.match(/^team\s*leader\s*:\s*<@!?(\d{17,20})>\s+([A-Za-z0-9_]{3,16})\s*$/i);if(match){if(leader)throw new Error("Include exactly one `Team Leader:` line.");leader={discordId:match[1],ign:match[2]};continue;}
-    match=line.match(/^player\s*([2-7])\s*:\s*<@!?(\d{17,20})>\s+([A-Za-z0-9_]{3,16})\s*$/i);if(match){const label=`Player ${match[1]}`;if(labels.has(label))throw new Error(`Include only one \`${label}:\` line.`);labels.add(label);players.push({discordId:match[2],ign:match[3]});continue;}
-    match=line.match(/^substitute\s*:\s*<@!?(\d{17,20})>\s+([A-Za-z0-9_]{3,16})\s*$/i);if(match){if(labels.has("Substitute"))throw new Error("Include only one `Substitute:` line.");labels.add("Substitute");players.push({discordId:match[1],ign:match[2]});continue;}
-    if(/^team\s*leader\s*:/i.test(line))throw new Error("`Team Leader` must contain a real Discord mention followed by the Minecraft IGN, separated by a space.");
-    if(/^player\s*\d+\s*:/i.test(line))throw new Error("Player lines must be numbered 2 through 7 and contain a real Discord mention followed by the Minecraft IGN.");
-    if(/^substitute\s*:/i.test(line))throw new Error("`Substitute` must contain a real Discord mention followed by the Minecraft IGN, separated by a space.");
+    match=line.match(/^team\s*leader\s*:\s*<@!?(\d{17,20})>\s+(\S+)\s*$/i);if(match&&validMinecraftIdentifier(match[2])){if(leader)throw new Error("Include exactly one `Team Leader:` line.");leader={discordId:match[1],ign:match[2]};continue;}
+    match=line.match(/^player\s*([2-7])\s*:\s*<@!?(\d{17,20})>\s+(\S+)\s*$/i);if(match&&validMinecraftIdentifier(match[3])){const label=`Player ${match[1]}`;if(labels.has(label))throw new Error(`Include only one \`${label}:\` line.`);labels.add(label);players.push({discordId:match[2],ign:match[3]});continue;}
+    match=line.match(/^substitute\s*:\s*<@!?(\d{17,20})>\s+(\S+)\s*$/i);if(match&&validMinecraftIdentifier(match[2])){if(labels.has("Substitute"))throw new Error("Include only one `Substitute:` line.");labels.add("Substitute");players.push({discordId:match[1],ign:match[2]});continue;}
+    if(/^team\s*leader\s*:/i.test(line))throw new Error("`Team Leader` must contain a real Discord mention followed by a valid Minecraft username or UUID, separated by a space.");
+    if(/^player\s*\d+\s*:/i.test(line))throw new Error("Player lines must be numbered 2 through 7 and contain a real Discord mention followed by a valid Minecraft username or UUID.");
+    if(/^substitute\s*:/i.test(line))throw new Error("`Substitute` must contain a real Discord mention followed by a valid Minecraft username or UUID, separated by a space.");
     throw new Error(`I could not read this line: \`${line.slice(0,80)}\``);
   }
-  if(!name)throw new Error("The signup is missing `Team Name:`.");if(!leader)throw new Error("The signup is missing a valid `Team Leader: @Discord IGN` line.");
+  if(!name)throw new Error("The signup is missing `Team Name:`.");if(!leader)throw new Error("The signup is missing a valid `Team Leader: @Discord Username-or-UUID` line.");
   if(!/^[A-Za-z0-9 _-]{1,16}$/.test(name)||!teamId(name))throw new Error("Team names must be 1–16 letters, numbers, spaces, `_`, or `-`.");
   const required=["Player 2","Player 3","Player 4","Player 5","Player 6","Player 7","Substitute"],missing=required.filter(label=>!labels.has(label));const roster=[leader,...players];if(missing.length)throw new Error(`Missing required slot${missing.length===1?"":"s"}: ${missing.join(", ")}.`);
   if(new Set(roster.map(member=>member.discordId)).size!==roster.length)throw new Error("A Discord member can only appear once in a signup.");
@@ -75,7 +75,7 @@ export async function handleSignupTeamsCommand(interaction,settings){
   return interaction.reply({content:`Approved signup rosters will now be posted in ${channel}.`,flags:MessageFlags.Ephemeral});
 }
 
-function signupGuide(){return{embeds:[new EmbedBuilder().setColor(0x00e5ff).setTitle("MPCS TEAM SIGNUP FORMAT").setDescription("Post your team using the exact structure below. Every slot is mandatory. Replace each placeholder with a real Discord mention and that player's exact Minecraft IGN.").addFields({name:"Copy this structure",value:`\`\`\`text\n${TEAM_FORMAT}\n\`\`\``},{name:"What you need to do",value:"• Fill Team Leader, Players 2–7, and Substitute.\n• Use a real Discord mention for every player.\n• Put the matching exact Minecraft IGN after the mention, separated by a space.\n• Check every IGN carefully; the bot verifies every Minecraft account.\n• Wait for configured staff to approve the post using ✅."}).setFooter({text:"Invalid posts are removed automatically and the DM explains exactly what needs fixing."})],allowedMentions:{parse:[]}};}
+function signupGuide(){return{embeds:[new EmbedBuilder().setColor(0x00e5ff).setTitle("MPCS TEAM SIGNUP FORMAT").setDescription("Post your team using the exact structure below. Every slot is mandatory. After each real Discord mention, enter that player's Minecraft username or UUID.").addFields({name:"Copy this structure",value:`\`\`\`text\n${TEAM_FORMAT}\n\`\`\``},{name:"What you need to do",value:"• Fill Team Leader, Players 2–7, and Substitute.\n• Use a real Discord mention for every player.\n• Put the matching Minecraft username or UUID after the mention, separated by a space.\n• UUIDs are resolved to the account's current username automatically.\n• Wait for configured staff to approve the post using ✅."}).setFooter({text:"Invalid posts are removed automatically and the DM explains exactly what needs fixing."})],allowedMentions:{parse:[]}};}
 
 export async function enforceSignupMessage(message,settings){
   if(!message.guild||message.author?.bot)return false;const config=approvalConfig(settings,message.guild.id);if(!config||message.channelId!==config.signupChannelId)return false;
@@ -120,7 +120,7 @@ export async function handleSignupReaction(reaction,user,settings){
   try{
     const signup=parseSignup(message.content);if(existingTeam(settings,signup))throw new Error(`A team named **${signup.name}** already exists or is queued.`);
     const discordMembers=await Promise.all(signup.roster.map(entry=>message.guild.members.fetch(entry.discordId).catch(()=>null)));if(discordMembers.some(member=>!member||member.user.bot))throw new Error("Every mentioned account must be a real member of this server.");
-    const profiles=await Promise.all(signup.roster.map(entry=>minecraftProfile(entry.ign)));const assigned=assignedUuids(settings);
+    const profiles=await Promise.all(signup.roster.map(entry=>minecraftProfile(entry.ign)));if(new Set(profiles.map(profile=>profile.uuid)).size!==profiles.length)throw new Error("A Minecraft account can only appear once in a signup, even when entered once by name and once by UUID.");const assigned=assignedUuids(settings);
     for(let index=0;index<profiles.length;index++){const profile=profiles[index],discordId=signup.roster[index].discordId,linked=settings.links[profile.uuid],otherLink=Object.entries(settings.links).find(([uuid,id])=>id===discordId&&uuid!==profile.uuid);if(linked&&linked!==discordId)throw new Error(`**${profile.name}** is linked to another Discord account.`);if(otherLink)throw new Error(`<@${discordId}> is linked to a different Minecraft account.`);if(assigned.has(profile.uuid))throw new Error(`**${profile.name}** is already on another team.`);}
     signup.roster.forEach((entry,index)=>settings.links[profiles[index].uuid]=entry.discordId);const colors=gradient(),preview={id:signup.id,name:signup.name,members:profiles.map(profile=>profile.uuid),playerNames:Object.fromEntries(profiles.map(profile=>[profile.uuid,profile.name]))};settings.teamActions.push({type:"create",...preview,leaderName:profiles[0].name,colors});settings.approvedSignupMessages[message.id]={status:"approved",at:Date.now(),approvedBy:user.id,teamId:signup.id,preview};await settings.save();
     const teamsChannelId=settings.signupApprovals._teamsChannelId,channel=teamsChannelId?await message.client.channels.fetch(teamsChannelId).catch(()=>null):null;if(!channel?.isSendable())throw new Error("The configured approved-teams channel is unavailable. Staff must run `/signupteams` again.");await channel.send({embeds:[new EmbedBuilder().setColor(Number.parseInt(colors[0].slice(1),16)).setTitle(`${signup.name} — APPROVED`).setDescription(`Approved from [the signup message](${message.url}) by <@${user.id}>.`).addFields({name:"Team Leader",value:`<@${signup.leader.discordId}> — **${profiles[0].name}**`},{name:"Players",value:signup.roster.slice(1).map((entry,index)=>`<@${entry.discordId}> — **${profiles[index+1].name}**`).join("\n")||"No additional players"},{name:"In-game Gradient",value:`\`${colors[0]} → ${colors[1]}\``}).setTimestamp()],allowedMentions:{parse:[]}});

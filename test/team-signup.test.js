@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { minecraftProfile, signupPanel, validIgn } from "../src/team-signup-ui.js";
+import { minecraftProfile, signupPanel, validIgn, validMinecraftIdentifier } from "../src/team-signup-ui.js";
 import { parseSignup, removeApprovedSignups } from "../src/signup-approval-service.js";
 
 test("public panel explains private verified invitations without a minimum roster claim",()=>{
@@ -22,6 +22,16 @@ test("canonicalizes a Mojang profile and UUID",async()=>{
   assert.deepEqual(profile,{uuid:"12345678-1234-5678-1234-567812345678",name:"TypedName"});
 });
 
+test("resolves dashed and compact Minecraft UUIDs to the current username",async()=>{
+  for(const input of ["12345678-1234-5678-1234-567812345678","12345678123456781234567812345678"]){
+    let requested;
+    const profile=await minecraftProfile(input,async url=>{requested=url;return{ok:true,status:200,json:async()=>({id:"12345678123456781234567812345678",name:"CurrentName"})}});
+    assert.equal(requested,"https://sessionserver.mojang.com/session/minecraft/profile/12345678123456781234567812345678");
+    assert.deepEqual(profile,{uuid:"12345678-1234-5678-1234-567812345678",name:"CurrentName"});
+  }
+  assert.equal(validMinecraftIdentifier("12345678-1234-5678-1234-567812345678"),true);
+});
+
 test("rejects Minecraft names Mojang cannot find",async()=>{
   await assert.rejects(()=>minecraftProfile("MissingName",async()=>({ok:false,status:404})),/could not find/);
 });
@@ -32,6 +42,11 @@ test("parses a numbered staff-approved signup message",()=>{
   assert.equal(signup.leader.discordId,"12345678901234567");
   assert.equal(signup.roster.length,8);
   assert.deepEqual(signup.roster.slice(0,3).map(member=>member.ign),["LeaderIGN","Player_Two","ThirdIGN"]);
+});
+
+test("accepts Minecraft UUIDs in staff-approved signup slots",()=>{
+  const signup=parseSignup(`Team Name: UUID Team\nTeam Leader: <@12345678901234567> 12345678-1234-5678-1234-567812345678\nPlayer 2: <@22345678901234567> PlayerTwo\nPlayer 3: <@32345678901234567> ThirdIGN\nPlayer 4: <@42345678901234567> FourthIGN\nPlayer 5: <@52345678901234567> FifthIGN\nPlayer 6: <@62345678901234567> SixthIGN\nPlayer 7: <@72345678901234567> SeventhIGN\nSubstitute: <@82345678901234567> SubIGN`);
+  assert.equal(signup.leader.ign,"12345678-1234-5678-1234-567812345678");
 });
 
 test("requires every signup roster slot",()=>{
