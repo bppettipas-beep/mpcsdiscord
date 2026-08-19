@@ -6,15 +6,15 @@ const COLORS=["#FF5555","#FFAA00","#FFFF55","#55FF55","#00AA00","#55FFFF","#5555
 const teamId=name=>name.toLowerCase().replace(/[^a-z0-9_-]/g,"").slice(0,16);
 const pendingDestructive=new Map();
 const TEAM_FORMAT=`Team Name: Your Team Name
-Team Leader: @Discord — IGN
+Team Leader: @Discord IGN
 
-Player 2: @Discord — IGN
-Player 3: @Discord — IGN
-Player 4: @Discord — IGN
-Player 5: @Discord — IGN
-Player 6: @Discord — IGN
-Player 7: @Discord — IGN
-Substitute: @Discord — IGN`;
+Player 2: @Discord IGN
+Player 3: @Discord IGN
+Player 4: @Discord IGN
+Player 5: @Discord IGN
+Player 6: @Discord IGN
+Player 7: @Discord IGN
+Substitute: @Discord IGN`;
 
 export const signupApprovalCommand=new SlashCommandBuilder().setName("signupapproval").setDescription("Configure staff-approved team signup messages").setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
   .addSubcommand(command=>command.setName("setup").setDescription("Set the signup channel and approving role")
@@ -35,14 +35,17 @@ export function parseSignup(content){
   let name=null,leader=null;const players=[],labels=new Set();
   for(const line of lines){
     let match=line.match(/^team\s*name\s*:\s*(.+)$/i);if(match){if(name)throw new Error("Include exactly one `Team name:` line.");name=match[1].trim();continue;}
-    match=line.match(/^team\s*leader\s*:\s*<@!?(\d{17,20})>\s*(?:—|-)\s*([A-Za-z0-9_]{3,16})\s*$/i);if(match){if(leader)throw new Error("Include exactly one `Team Leader:` line.");leader={discordId:match[1],ign:match[2]};continue;}
-    match=line.match(/^player\s*([2-7])\s*:\s*<@!?(\d{17,20})>\s*(?:—|-)\s*([A-Za-z0-9_]{3,16})\s*$/i);if(match){const label=`Player ${match[1]}`;if(labels.has(label))throw new Error(`Include only one \`${label}:\` line.`);labels.add(label);players.push({discordId:match[2],ign:match[3]});continue;}
-    match=line.match(/^substitute\s*:\s*<@!?(\d{17,20})>\s*(?:—|-)\s*([A-Za-z0-9_]{3,16})\s*$/i);if(match){if(labels.has("Substitute"))throw new Error("Include only one `Substitute:` line.");labels.add("Substitute");players.push({discordId:match[1],ign:match[2]});continue;}
+    match=line.match(/^team\s*leader\s*:\s*<@!?(\d{17,20})>\s+([A-Za-z0-9_]{3,16})\s*$/i);if(match){if(leader)throw new Error("Include exactly one `Team Leader:` line.");leader={discordId:match[1],ign:match[2]};continue;}
+    match=line.match(/^player\s*([2-7])\s*:\s*<@!?(\d{17,20})>\s+([A-Za-z0-9_]{3,16})\s*$/i);if(match){const label=`Player ${match[1]}`;if(labels.has(label))throw new Error(`Include only one \`${label}:\` line.`);labels.add(label);players.push({discordId:match[2],ign:match[3]});continue;}
+    match=line.match(/^substitute\s*:\s*<@!?(\d{17,20})>\s+([A-Za-z0-9_]{3,16})\s*$/i);if(match){if(labels.has("Substitute"))throw new Error("Include only one `Substitute:` line.");labels.add("Substitute");players.push({discordId:match[1],ign:match[2]});continue;}
+    if(/^team\s*leader\s*:/i.test(line))throw new Error("`Team Leader` must contain a real Discord mention followed by the Minecraft IGN, separated by a space.");
+    if(/^player\s*\d+\s*:/i.test(line))throw new Error("Player lines must be numbered 2 through 7 and contain a real Discord mention followed by the Minecraft IGN.");
+    if(/^substitute\s*:/i.test(line))throw new Error("`Substitute` must contain a real Discord mention followed by the Minecraft IGN, separated by a space.");
     throw new Error(`I could not read this line: \`${line.slice(0,80)}\``);
   }
-  if(!name||!leader)throw new Error("The signup needs `Team Name:` and `Team Leader: @Discord — IGN`.");
+  if(!name)throw new Error("The signup is missing `Team Name:`.");if(!leader)throw new Error("The signup is missing a valid `Team Leader: @Discord IGN` line.");
   if(!/^[A-Za-z0-9 _-]{1,16}$/.test(name)||!teamId(name))throw new Error("Team names must be 1–16 letters, numbers, spaces, `_`, or `-`.");
-  const roster=[leader,...players];if(roster.length!==8||labels.size!==7)throw new Error("Every slot is required: Team Leader, Players 2–7, and Substitute.");
+  const required=["Player 2","Player 3","Player 4","Player 5","Player 6","Player 7","Substitute"],missing=required.filter(label=>!labels.has(label));const roster=[leader,...players];if(missing.length)throw new Error(`Missing required slot${missing.length===1?"":"s"}: ${missing.join(", ")}.`);
   if(new Set(roster.map(member=>member.discordId)).size!==roster.length)throw new Error("A Discord member can only appear once in a signup.");
   if(new Set(roster.map(member=>member.ign.toLowerCase())).size!==roster.length)throw new Error("A Minecraft username can only appear once in a signup.");
   return{id:teamId(name),name,leader,...{roster}};
@@ -72,7 +75,7 @@ export async function handleSignupTeamsCommand(interaction,settings){
   return interaction.reply({content:`Approved signup rosters will now be posted in ${channel}.`,flags:MessageFlags.Ephemeral});
 }
 
-function signupGuide(){return{embeds:[new EmbedBuilder().setColor(0x00e5ff).setTitle("MPCS TEAM SIGNUP FORMAT").setDescription("Post your team using the exact structure below. Every slot is mandatory. Replace each placeholder with a real Discord mention and that player's exact Minecraft IGN.").addFields({name:"Copy this structure",value:`\`\`\`text\n${TEAM_FORMAT}\n\`\`\``},{name:"What you need to do",value:"• Fill Team Leader, Players 2–7, and Substitute.\n• Use a real Discord mention for every player.\n• Put the matching exact Minecraft IGN after the dash.\n• Check every IGN carefully; the bot verifies every Minecraft account.\n• Wait for configured staff to approve the post using ✅."}).setFooter({text:"Invalid posts are removed automatically and the correct format is sent by DM."})],allowedMentions:{parse:[]}};}
+function signupGuide(){return{embeds:[new EmbedBuilder().setColor(0x00e5ff).setTitle("MPCS TEAM SIGNUP FORMAT").setDescription("Post your team using the exact structure below. Every slot is mandatory. Replace each placeholder with a real Discord mention and that player's exact Minecraft IGN.").addFields({name:"Copy this structure",value:`\`\`\`text\n${TEAM_FORMAT}\n\`\`\``},{name:"What you need to do",value:"• Fill Team Leader, Players 2–7, and Substitute.\n• Use a real Discord mention for every player.\n• Put the matching exact Minecraft IGN after the mention, separated by a space.\n• Check every IGN carefully; the bot verifies every Minecraft account.\n• Wait for configured staff to approve the post using ✅."}).setFooter({text:"Invalid posts are removed automatically and the DM explains exactly what needs fixing."})],allowedMentions:{parse:[]}};}
 
 export async function enforceSignupMessage(message,settings){
   if(!message.guild||message.author?.bot)return false;const config=approvalConfig(settings,message.guild.id);if(!config||message.channelId!==config.signupChannelId)return false;
