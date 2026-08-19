@@ -4,6 +4,16 @@ import { minecraftProfile } from "./team-signup-ui.js";
 
 const COLORS=["#FF5555","#FFAA00","#FFFF55","#55FF55","#00AA00","#55FFFF","#5555FF","#0000AA","#AA00AA","#FF55FF","#FFFFFF","#AAAAAA","#00AAAA","#AA5500"];
 const teamId=name=>name.toLowerCase().replace(/[^a-z0-9_-]/g,"").slice(0,16);
+const TEAM_FORMAT=`Team Name: Your Team Name
+Team Leader: @Discord — IGN
+
+Player 2: @Discord — IGN
+Player 3: @Discord — IGN
+Player 4: @Discord — IGN
+Player 5: @Discord — IGN
+Player 6: @Discord — IGN
+Player 7: @Discord — IGN
+Substitute: @Discord — IGN`;
 
 export const signupApprovalCommand=new SlashCommandBuilder().setName("signupapproval").setDescription("Configure staff-approved team signup messages").setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
   .addSubcommand(command=>command.setName("setup").setDescription("Set the signup channel and approving role")
@@ -28,7 +38,7 @@ export function parseSignup(content){
   }
   if(!name||!leader)throw new Error("The signup needs `Team Name:` and `Team Leader: @Discord — IGN`.");
   if(!/^[A-Za-z0-9 _-]{1,16}$/.test(name)||!teamId(name))throw new Error("Team names must be 1–16 letters, numbers, spaces, `_`, or `-`.");
-  const roster=[leader,...players];if(roster.length>8)throw new Error("A team can contain at most eight players.");
+  const roster=[leader,...players];if(roster.length!==8||labels.size!==7)throw new Error("Every slot is required: Team Leader, Players 2–7, and Substitute.");
   if(new Set(roster.map(member=>member.discordId)).size!==roster.length)throw new Error("A Discord member can only appear once in a signup.");
   if(new Set(roster.map(member=>member.ign.toLowerCase())).size!==roster.length)throw new Error("A Minecraft username can only appear once in a signup.");
   return{id:teamId(name),name,leader,...{roster}};
@@ -47,7 +57,12 @@ export async function handleSignupTeamsCommand(interaction,settings){
   return interaction.reply({content:`Approved signup rosters will now be posted in ${channel}.`,flags:MessageFlags.Ephemeral});
 }
 
-function signupGuide(){return{embeds:[new EmbedBuilder().setColor(0x00e5ff).setTitle("MPCS TEAM SIGNUP FORMAT").setDescription("Post your team using the exact structure below. Replace each placeholder with a real Discord mention and that player's exact Minecraft IGN.").addFields({name:"Copy this structure",value:"```text\nTeam Name: Your Team Name\nTeam Leader: @Discord — IGN\n\nPlayer 2: @Discord — IGN\nPlayer 3: @Discord — IGN\nPlayer 4: @Discord — IGN\nPlayer 5: @Discord — IGN\nPlayer 6: @Discord — IGN\nPlayer 7: @Discord — IGN\nSubstitute: @Discord — IGN\n```"},{name:"What you need to do",value:"• Use a real Discord mention for every player.\n• Put the matching exact Minecraft IGN after the dash.\n• Check every IGN carefully; the bot verifies every Minecraft account.\n• Wait for configured staff to approve the post using ✅."}).setFooter({text:"Do not react to your own signup. Wait for staff approval."})],allowedMentions:{parse:[]}};}
+function signupGuide(){return{embeds:[new EmbedBuilder().setColor(0x00e5ff).setTitle("MPCS TEAM SIGNUP FORMAT").setDescription("Post your team using the exact structure below. Every slot is mandatory. Replace each placeholder with a real Discord mention and that player's exact Minecraft IGN.").addFields({name:"Copy this structure",value:`\`\`\`text\n${TEAM_FORMAT}\n\`\`\``},{name:"What you need to do",value:"• Fill Team Leader, Players 2–7, and Substitute.\n• Use a real Discord mention for every player.\n• Put the matching exact Minecraft IGN after the dash.\n• Check every IGN carefully; the bot verifies every Minecraft account.\n• Wait for configured staff to approve the post using ✅."}).setFooter({text:"Invalid posts are removed automatically and the correct format is sent by DM."})],allowedMentions:{parse:[]}};}
+
+export async function enforceSignupMessage(message,settings){
+  if(!message.guild||message.author?.bot)return false;const config=approvalConfig(settings,message.guild.id);if(!config||message.channelId!==config.signupChannelId)return false;
+  try{parseSignup(message.content);return true;}catch(error){await message.delete().catch(()=>null);await message.author.send({content:`Your MPCS team signup was removed because the format was invalid:\n\n**${error.message}**\n\nUse every slot exactly like this:\n\`\`\`text\n${TEAM_FORMAT}\n\`\`\``,allowedMentions:{parse:[]}}).catch(()=>null);return true;}
+}
 
 export async function handleSignupApprovalCommand(interaction,settings){
   if(!interaction.inGuild()||!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild))return interaction.reply({content:"You need Manage Server permission.",flags:MessageFlags.Ephemeral});
@@ -56,7 +71,7 @@ export async function handleSignupApprovalCommand(interaction,settings){
   if(action==="disable"){delete settings.signupApprovals[interaction.guildId];await settings.save();return interaction.reply({content:"Reaction-based team signup approval is disabled.",flags:MessageFlags.Ephemeral});}
   if(action==="role"){const config=approvalConfig(settings,interaction.guildId);if(!config)return interaction.reply({content:"Run `/signupapproval setup` first.",flags:MessageFlags.Ephemeral});config.staffRoleId=interaction.options.getRole("staff-role",true).id;await settings.save();return interaction.reply({content:`Only members with <@&${config.staffRoleId}> can now approve team signups with ✅.`,flags:MessageFlags.Ephemeral,allowedMentions:{parse:[]}});}
   const signupChannel=interaction.options.getChannel("signup-channel",true),role=interaction.options.getRole("staff-role",true),me=interaction.guild.members.me;
-  if(!signupChannel.isTextBased()||!signupChannel.isSendable()||!signupChannel.permissionsFor(me)?.has([PermissionFlagsBits.ViewChannel,PermissionFlagsBits.SendMessages,PermissionFlagsBits.ReadMessageHistory]))return interaction.reply({content:`I need View Channel, Send Messages, and Read Message History in ${signupChannel}.`,flags:MessageFlags.Ephemeral});
+  if(!signupChannel.isTextBased()||!signupChannel.isSendable()||!signupChannel.permissionsFor(me)?.has([PermissionFlagsBits.ViewChannel,PermissionFlagsBits.SendMessages,PermissionFlagsBits.ReadMessageHistory,PermissionFlagsBits.ManageMessages]))return interaction.reply({content:`I need View Channel, Send Messages, Read Message History, and Manage Messages in ${signupChannel}.`,flags:MessageFlags.Ephemeral});
   settings.signupApprovals[interaction.guildId]={signupChannelId:signupChannel.id,staffRoleId:role.id};await settings.save();
   const guide=await signupChannel.send(signupGuide());
   return interaction.reply({content:`Configured ${signupChannel} for signups. Members with ${role} can approve using ✅. Approved rosters use the channel selected with \`/signupteams\` in the staff server. I posted the exact signup instructions here: ${guide.url}`,flags:MessageFlags.Ephemeral,allowedMentions:{parse:[]}});

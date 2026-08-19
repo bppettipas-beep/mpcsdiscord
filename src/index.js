@@ -15,7 +15,7 @@ import { teamSignupCommand, signupPanel, handleTeamSignup } from "./team-signup-
 import { teamLeaderCommand, openTeamLeader, handleTeamLeader } from "./team-leader-ui.js";
 import { assignJoinRole, handleRoleAllCommand, reconcileAutoRole, roleAllCommand } from "./role-service.js";
 import { configureTeamLogs, publishTeamLogs, teamLogsCommand } from "./team-log-service.js";
-import { handleSignupApprovalCommand, handleSignupReaction, handleSignupTeamsCommand, signupApprovalCommand, signupTeamsCommand } from "./signup-approval-service.js";
+import { enforceSignupMessage, handleSignupApprovalCommand, handleSignupReaction, handleSignupTeamsCommand, signupApprovalCommand, signupTeamsCommand } from "./signup-approval-service.js";
 
 const required = ["DISCORD_TOKEN", "BRIDGE_SECRET"];
 const missing = required.filter((name) => !process.env[name]);
@@ -380,7 +380,7 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
-client.on("messageCreate", message => void automod.message(message).catch(error => console.error("AutoMod message handling failed:", error)));
+client.on("messageCreate",message=>void enforceSignupMessage(message,settings).then(handled=>handled||automod.message(message)).catch(error=>console.error("Message handling failed:",error)));
 client.on("messageReactionAdd",(reaction,user)=>void handleSignupReaction(reaction,user,settings).catch(error=>console.error("Team signup approval failed:",error)));
 client.on("messageDelete",message=>void auditLogs.messageDelete(message).catch(error=>console.error("Message delete logging failed:",error)));
 client.on("messageUpdate",(before,after)=>void auditLogs.messageUpdate(before,after).catch(error=>console.error("Message edit logging failed:",error)));
