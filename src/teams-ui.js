@@ -1,4 +1,5 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, ModalBuilder, PermissionFlagsBits, SlashCommandBuilder, StringSelectMenuBuilder, TextInputBuilder, TextInputStyle } from "discord.js";
+import { websiteTeams } from "./team-source.js";
 
 const COLORS = [["Red", "#FF5555"], ["Gold", "#FFAA00"], ["Yellow", "#FFFF55"], ["Green", "#55FF55"], ["Dark Green", "#00AA00"], ["Aqua", "#55FFFF"], ["Blue", "#5555FF"], ["Dark Blue", "#0000AA"], ["Purple", "#AA00AA"], ["Pink", "#FF55FF"], ["White", "#FFFFFF"], ["Gray", "#AAAAAA"], ["Dark Gray", "#555555"], ["Black", "#111111"], ["Cyan", "#00AAAA"], ["Brown", "#AA5500"]];
 export const teamsCommand = new SlashCommandBuilder().setName("editteams").setDescription("Open the Minecraft team manager").setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
@@ -13,11 +14,12 @@ function publicTeamPanel(s,page=0){const teams=publicTeamList(s),pages=Math.max(
 export function openPublicTeams(interaction,s){return interaction.reply({...publicTeamPanel(s),flags:MessageFlags.Ephemeral});}
 export async function handlePublicTeams(interaction,s){if(!interaction.isButton()||!interaction.customId.startsWith("publicteams:"))return false;const[,action,value,extra]=interaction.customId.split(":");if(action==="page"){await interaction.update(publicTeamPanel(s,Number(value)||0));return true;}if(action==="back"){await interaction.update(publicTeamPanel(s,Number(value)||0));return true;}const page=Number(value)||0,id=extra,team=publicTeamList(s).find(entry=>entry.id===id);if(!team){await interaction.update(publicTeamPanel(s,page));return true;}const roster=(team.members||[]).map((uuid,index)=>{const discordId=s.links?.[uuid];return `**${index+1}. ${publicPlayerName(s,team,uuid)}**${discordId?` • <@${discordId}>`:""}`;}).join("\n")||"No players listed";await interaction.update({embeds:[new EmbedBuilder().setColor(0x00e5ff).setTitle(String(team.name||team.id)).setDescription(roster).addFields({name:"Roster Size",value:`${(team.members||[]).length}/8`,inline:true})],components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`publicteams:back:${page}`).setLabel("Back to Teams").setStyle(ButtonStyle.Secondary))],allowedMentions:{parse:[]}});return true;}
 
-export function panel(s, note = "Select a team or create one.") {
-  const teams = s.teamSnapshot.teams || [], components = [];
-  if (teams.length) components.push(select("teams:select", "Select a team", teams.slice(0, 25).map(team => ({ label: team.name, value: team.id, description: `${team.members.length}/8 members` }))));
+export function panel(s, note = "Select a team or create one.",page=0) {
+  const teams=websiteTeams(s),pages=Math.max(1,Math.ceil(teams.length/25)),current=Math.max(0,Math.min(pages-1,page)),shown=teams.slice(current*25,current*25+25),components = [];
+  if (shown.length) components.push(select(`teams:select:${current}`, "Select a team", shown.map(team => ({ label: team.name, value: team.id, description: `${(team.members||[]).length}/8 members` }))));
+  if(pages>1)components.push(new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`teams:page:${current-1}`).setLabel("Previous").setStyle(ButtonStyle.Secondary).setDisabled(current===0),new ButtonBuilder().setCustomId(`teams:page:${current+1}`).setLabel("Next").setStyle(ButtonStyle.Secondary).setDisabled(current===pages-1)));
   components.push(new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("teams:create").setLabel("Create Team").setStyle(ButtonStyle.Success), new ButtonBuilder().setCustomId("teams:refresh").setLabel("Refresh").setStyle(ButtonStyle.Secondary)));
-  return { embeds: [new EmbedBuilder().setTitle("MPCS Team Manager").setDescription(note).setColor(0x00e5ff).addFields({ name: "Teams", value: teams.length ? teams.map(team => `**${team.name}** - ${team.members.length}/8`).join("\n") : "None" })], components };
+  return { embeds: [new EmbedBuilder().setTitle("MPCS Team Manager").setDescription(note).setColor(0x00e5ff).addFields({ name: `Teams (${teams.length})`, value: shown.length ? shown.map(team => `**${team.name}** - ${(team.members||[]).length}/8`).join("\n").slice(0,1024) : "None" }).setFooter({text:`Page ${current+1}/${pages}`})], components };
 }
 
 function colors(stage) {
@@ -36,10 +38,10 @@ function memberPicker(s, draft, editing = false) {
   return { embeds: [new EmbedBuilder().setTitle(`${editing ? "Edit" : "Members for"} ${draft.name}`).setDescription(`Selected: ${draft.members.length}/8\nDiscord linking is optional.`).setColor(0x00e5ff)], components };
 }
 
-function detail(s, id) {
-  const team = (s.teamSnapshot.teams || []).find(entry => entry.id === id);
+function detail(s, id,page=0) {
+  const team = websiteTeams(s).find(entry => entry.id === id);
   if (!team) return panel(s);
-  return { embeds: [new EmbedBuilder().setTitle(team.name).setDescription(`Members: ${team.members.map(uuid => playerName(s, uuid)).join(", ") || "None"}`).setColor(0x00e5ff)], components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`teams:edit:${id}`).setLabel("Add / Remove People").setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId(`teams:delete:${id}`).setLabel("Delete").setStyle(ButtonStyle.Danger), new ButtonBuilder().setCustomId("teams:back").setLabel("Back").setStyle(ButtonStyle.Secondary))] };
+  return { embeds: [new EmbedBuilder().setTitle(team.name).setDescription(`Members: ${(team.members||[]).map(uuid => team.playerNames?.[uuid]||playerName(s, uuid)).join(", ") || "None"}`).setColor(0x00e5ff)], components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`teams:edit:${id}`).setLabel("Add / Remove People").setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId(`teams:delete:${id}`).setLabel("Delete").setStyle(ButtonStyle.Danger), new ButtonBuilder().setCustomId(`teams:page:${page}`).setLabel("Back").setStyle(ButtonStyle.Secondary))] };
 }
 
 export async function handleTeams(i, s) {
@@ -67,9 +69,10 @@ export async function handleTeams(i, s) {
     if (!draft?.leaderName) return i.reply({ content: "A team leader IGN is required.", flags: MessageFlags.Ephemeral });
     s.teamActions.push({ type: "create", ...draft }); delete s.teamDrafts[key]; await s.save(); return i.update(panel(s, "Team queued; Minecraft will apply it shortly."));
   }
-  if (op === "select") return i.update(detail(s, i.values[0]));
+  if (op === "select") return i.update(detail(s,i.values[0],Number(id)||0));
+  if (op === "page") return i.update(panel(s,"Select a team or create one.",Number(id)||0));
   if (op === "edit") {
-    const team = (s.teamSnapshot.teams || []).find(entry => entry.id === id); if (!team) return i.update(panel(s));
+    const team = websiteTeams(s).find(entry => entry.id === id); if (!team) return i.update(panel(s));
     draft = { id, name: team.name, members: [...team.members] }; s.teamDrafts[key] = draft; await s.save(); return i.update(memberPicker(s, draft, true));
   }
   if (op === "save") { draft = s.teamDrafts[key]; if (!draft || draft.id !== id) return i.update(panel(s, "Edit session expired.")); s.teamActions.push({ type: "members", id, members: draft.members }); delete s.teamDrafts[key]; await s.save(); return i.update(panel(s, "Member changes queued.")); }
