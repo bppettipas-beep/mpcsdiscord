@@ -1,7 +1,7 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, ModalBuilder, PermissionFlagsBits, SlashCommandBuilder, StringSelectMenuBuilder, TextInputBuilder, TextInputStyle } from "discord.js";
 
 const COLORS = [["Red", "#FF5555"], ["Gold", "#FFAA00"], ["Yellow", "#FFFF55"], ["Green", "#55FF55"], ["Dark Green", "#00AA00"], ["Aqua", "#55FFFF"], ["Blue", "#5555FF"], ["Dark Blue", "#0000AA"], ["Purple", "#AA00AA"], ["Pink", "#FF55FF"], ["White", "#FFFFFF"], ["Gray", "#AAAAAA"], ["Dark Gray", "#555555"], ["Black", "#111111"], ["Cyan", "#00AAAA"], ["Brown", "#AA5500"]];
-export const teamsCommand = new SlashCommandBuilder().setName("teams").setDescription("Open the Minecraft team manager").setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
+export const teamsCommand = new SlashCommandBuilder().setName("editteams").setDescription("Open the Minecraft team manager").setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 const select = (id, placeholder, options, min = 1, max = 1) => new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(id).setPlaceholder(placeholder).setMinValues(min).setMaxValues(max).addOptions(options));
 const linked = (s, uuid) => Boolean(s.links?.[uuid]);
 const playerName = (s, uuid) => (s.teamSnapshot.players || []).find(player => player.uuid === uuid)?.name || uuid;
