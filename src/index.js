@@ -8,7 +8,7 @@ import { publicTeamsCommand, openPublicTeams, handlePublicTeams } from "./teams-
 import { teamAdminCommand, openTeamAdmin, handleTeamAdmin } from "./team-admin-ui.js";
 import { embedCommand, sayCommand, statsCommand, openEmbed, handleEmbed, say, serverStats } from "./admin-ui.js";
 import { scheduleCommand, panel as schedulePanel, handleSchedule } from "./schedule-ui.js";
-import { ticketCommand, ticketActionCommands, handleTicketCommand, handleTicketComponent, repairTicketNumbers, enforceTicketRestrictionsForMember } from "./ticket-ui.js";
+import { ticketCommand, ticketActionCommands, handleTicketCommand, handleTicketComponent, repairTicketNumbers, repairOpenTicketStaffAccess, enforceTicketRestrictionsForMember } from "./ticket-ui.js";
 import { automodCommand, AutoModService } from "./automod-service.js";
 import { logsCommand, AuditLogService } from "./audit-log-service.js";
 import { welcomeCommand, handleWelcomeCommand, welcomeMember } from "./welcome-service.js";
@@ -287,6 +287,7 @@ client.once("clientReady", async () => {
     else await client.application.commands.set([]);
     radio.setVolume(settings.radioVolume);
     await repairTicketNumbers(client,settings);
+    const ticketAccessRepair=await repairOpenTicketStaffAccess(client,settings);console.log(`Ticket access repair: ${ticketAccessRepair.tickets} open tickets checked, ${ticketAccessRepair.members} staff overwrites repaired, ${ticketAccessRepair.failed} failed.`);
     const reconcileConfiguredAutoRoles=async()=>{for(const[guildId,roleId]of Object.entries(settings.autoRoles)){const guild=await client.guilds.fetch(guildId).catch(()=>null);if(guild)void reconcileAutoRole(guild,roleId).then(result=>console.log(`Autorole reconciliation in ${guild.name}: ${result.added} added, ${result.alreadyHad} already assigned, ${result.failed} failed.`)).catch(error=>console.error(`Autorole reconciliation failed in ${guild.name}:`,error.message));}};
     await reconcileConfiguredAutoRoles();
     const autoRoleRepairTimer=setInterval(()=>void reconcileConfiguredAutoRoles(),300_000);autoRoleRepairTimer.unref();
