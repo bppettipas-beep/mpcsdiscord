@@ -83,15 +83,19 @@ export async function repairTicketNumbers(client,settings){let changed=false;con
 
 async function isTicketStaff(interaction, settings, record) {
   const config = configFor(settings, interaction.guildId), member = await interaction.guild.members.fetch(interaction.user.id);
-  if((config?.restrictedRoleIds||[]).some(roleId=>member.roles.cache.has(roleId)))return false;
+  // Discord administrators and members who can manage the ticket channel must
+  // never be locked out just because they also hold a restricted participant role.
+  if(member.permissions.has([PermissionFlagsBits.Administrator])||member.permissions.has(PermissionFlagsBits.ManageGuild)||member.permissionsIn(interaction.channel).has(PermissionFlagsBits.ManageChannels))return true;
   // Older tickets stored the role selected when they were created. Keep that
   // role valid, but always include the guild's current support role so a role
-  // configuration change does not strand existing tickets.
+  // configuration change does not strand existing tickets. Staff-role access
+  // takes precedence over unrelated restricted roles a staff member may hold.
   const roleIds = [...new Set([record?.pingRoleId, config?.supportRoleId].filter(Boolean))];
   for (const roleId of roleIds) {
     const requiredRole = interaction.guild.roles.cache.get(roleId) || await interaction.guild.roles.fetch(roleId).catch(() => null);
-    if (requiredRole && (member.roles.cache.has(roleId) || member.roles.highest.position > requiredRole.position)) return true;
+    if (requiredRole && (member.roles.cache.has(roleId) || member.roles.highest.comparePositionTo(requiredRole) > 0)) return true;
   }
+  if((config?.restrictedRoleIds||[]).some(roleId=>member.roles.cache.has(roleId)))return false;
   return false;
 }
 
