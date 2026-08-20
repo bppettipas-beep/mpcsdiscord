@@ -87,7 +87,10 @@ async function isTicketStaff(interaction, settings, record) {
   const config = configFor(settings, interaction.guildId), member = await interaction.guild.members.fetch(interaction.user.id);
   // Discord administrators and members who can manage the ticket channel must
   // never be locked out just because they also hold a restricted participant role.
-  if(member.permissions.has([PermissionFlagsBits.Administrator])||member.permissions.has(PermissionFlagsBits.ManageGuild)||member.permissionsIn(interaction.channel).has(PermissionFlagsBits.ManageChannels))return true;
+  // Manage Messages is intentionally granted to every ticket staff role, so it
+  // is also the reliable fallback for legacy tickets with stale saved role IDs.
+  const channelPermissions=member.permissionsIn(interaction.channel);
+  if(member.permissions.has(PermissionFlagsBits.Administrator)||member.permissions.has(PermissionFlagsBits.ManageGuild)||channelPermissions.has(PermissionFlagsBits.ManageChannels)||channelPermissions.has(PermissionFlagsBits.ManageMessages)||record?.claimedBy===member.id)return true;
   // Older tickets stored the role selected when they were created. Keep that
   // role valid, but always include the guild's current support role so a role
   // configuration change does not strand existing tickets. Staff-role access
