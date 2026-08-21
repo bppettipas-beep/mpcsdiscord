@@ -15,6 +15,7 @@ test("persists and reloads channels and ticket state", async () => {
   writer.auditLogs.guild = { text: "text", member: "member", mod: "mod" };
   writer.autoRoles.guild = "role";
   writer.welcomeMessages.guild = { channelId: "welcome", message: "Welcome {member name} to {guild name}!" };
+  writer.processedStatMatches["match-1"] = 123;
   await writer.saveChannel("123456789012345678");
   const reader = new SettingsStore(path);
   assert.equal(await reader.load(), "123456789012345678");
@@ -24,7 +25,8 @@ test("persists and reloads channels and ticket state", async () => {
   assert.deepEqual(reader.auditLogs.guild, { text: "text", member: "member", mod: "mod" });
   assert.equal(reader.autoRoles.guild, "role");
   assert.deepEqual(reader.welcomeMessages.guild, { channelId: "welcome", message: "Welcome {member name} to {guild name}!" });
-  assert.deepEqual(JSON.parse(await readFile(path, "utf8")), { channelId: "123456789012345678", radioChannelId: null, radioVolume: 80, pending: {}, links: {}, teamSnapshot: { teams: [], players: [] }, teamActions: [], teamDrafts: {}, teamSignupDrafts: {}, teamLeaderDrafts: {}, teamLeaderInvites: [], originalNicknames: {}, teamNicknameOptOut: {}, schedules: [], matchTicketConfig: {}, teamLogChannelId: null, teamLogDigest: "", ticketConfig: { guild: { panelChannelId: "panel", categoryId: "category", supportRoleId: "support" } }, tickets: { "guild:user": { channelId: "ticket", userId: "user", openedAt: "2026-08-14T00:00:00.000Z" } }, automod: { guild: { enabled: true } }, auditLogs: { guild: { text: "text", member: "member", mod: "mod" } }, autoRoles: { guild: "role" }, welcomeMessages: { guild: { channelId: "welcome", message: "Welcome {member name} to {guild name}!" } }, signupApprovals: {}, approvedSignupMessages: {} });
+  assert.deepEqual(reader.processedStatMatches, { "match-1": 123 });
+  assert.deepEqual(JSON.parse(await readFile(path, "utf8")), { channelId: "123456789012345678", radioChannelId: null, radioVolume: 80, pending: {}, links: {}, teamSnapshot: { teams: [], players: [] }, teamActions: [], teamDrafts: {}, teamSignupDrafts: {}, teamLeaderDrafts: {}, teamLeaderInvites: [], originalNicknames: {}, teamNicknameOptOut: {}, schedules: [], matchTicketConfig: {}, teamLogChannelId: null, teamLogDigest: "", ticketConfig: { guild: { panelChannelId: "panel", categoryId: "category", supportRoleId: "support" } }, tickets: { "guild:user": { channelId: "ticket", userId: "user", openedAt: "2026-08-14T00:00:00.000Z" } }, automod: { guild: { enabled: true } }, auditLogs: { guild: { text: "text", member: "member", mod: "mod" } }, autoRoles: { guild: "role" }, welcomeMessages: { guild: { channelId: "welcome", message: "Welcome {member name} to {guild name}!" } }, signupApprovals: {}, approvedSignupMessages: {}, processedStatMatches: { "match-1": 123 } });
 });
 
 test("recovers ticket configuration from the last known-good backup", async () => {

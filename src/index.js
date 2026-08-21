@@ -143,7 +143,7 @@ const server = createServer(async(request, response) => {
     response.end(JSON.stringify({ ok: Boolean(discordChannel), build: "team-signup-v2" }));
     return;
   }
-  if (request.method !== "POST" || !["/minecraft-chat", "/link/start", "/link/remove", "/rank-sync", "/teams/sync", "/match/status", "/match/result", "/match/reset", "/match/live", "/player-stats/sync"].includes(request.url)) {
+  if (request.method !== "POST" || !["/minecraft-chat", "/link/start", "/link/remove", "/rank-sync", "/teams/sync", "/match/status", "/match/result", "/match/reset", "/match/live", "/player-stats/sync", "/player-stats/match"].includes(request.url)) {
     response.writeHead(404).end();
     return;
   }
@@ -162,9 +162,24 @@ const server = createServer(async(request, response) => {
   request.on("end", () => {
     try {
       const value = JSON.parse(body);
+      if(request.url==="/player-stats/match"){
+        if(typeof value.matchId!=="string"||!value.matchId||!Array.isArray(value.players)||value.players.length!==2){response.writeHead(400).end();return;}
+        settings.processedStatMatches ||= {};
+        if(settings.processedStatMatches[value.matchId]){response.writeHead(204).end();return;}
+        const byId=new Map((settings.playerStats||[]).filter(p=>p?.uuid).map(p=>[p.uuid,p]));
+        for(const raw of value.players){
+          if(!raw||typeof raw.uuid!=="string"||typeof raw.name!=="string"){response.writeHead(400).end();return;}
+          const old=byId.get(raw.uuid)||{uuid:raw.uuid,name:raw.name.slice(0,16),gamesPlayed:0,wins:0,losses:0,kills:0,deaths:0,roundsPlayed:0,damageDealt:0,damageTaken:0,hitsLanded:0,highestHit:0,playtimeSeconds:0,forfeits:0,currentWinStreak:0,bestWinStreak:0,modes:[]};
+          const won=raw.won===true, mode=String(value.mode||"unknown");
+          old.name=raw.name.slice(0,16);old.gamesPlayed=Number(old.gamesPlayed||0)+1;old.wins=Number(old.wins||0)+(won?1:0);old.losses=Number(old.losses||0)+(won?0:1);old.kills=Number(old.kills||0)+Number(raw.kills||0);old.deaths=Number(old.deaths||0)+Number(raw.deaths||0);old.roundsPlayed=Number(old.roundsPlayed||0)+Number(raw.rounds||0);old.damageDealt=Number(old.damageDealt||0)+Number(raw.damageDealt||0);old.damageTaken=Number(old.damageTaken||0)+Number(raw.damageTaken||0);old.hitsLanded=Number(old.hitsLanded||0)+Number(raw.hitsLanded||0);old.highestHit=Math.max(Number(old.highestHit||0),Number(raw.highestHit||0));old.playtimeSeconds=Number(old.playtimeSeconds||0)+Number(value.playtimeSeconds||0);old.forfeits=Number(old.forfeits||0)+(raw.forfeit===true?1:0);old.currentWinStreak=won?Number(old.currentWinStreak||0)+1:0;old.bestWinStreak=Math.max(Number(old.bestWinStreak||0),old.currentWinStreak);old.winPercentage=old.gamesPlayed?Math.round(old.wins*1000/old.gamesPlayed)/10:0;old.kdRatio=old.deaths?old.kills/old.deaths:old.kills;
+          old.modes=Array.isArray(old.modes)?old.modes:[];let m=old.modes.find(x=>x.mode===mode);if(!m){m={mode,gamesPlayed:0,wins:0,losses:0,kills:0,deaths:0,damageDealt:0,damageTaken:0,hitsLanded:0,playtimeSeconds:0};old.modes.push(m);}m.gamesPlayed++;m.wins+=won?1:0;m.losses+=won?0:1;m.kills+=Number(raw.kills||0);m.deaths+=Number(raw.deaths||0);m.damageDealt+=Number(raw.damageDealt||0);m.damageTaken+=Number(raw.damageTaken||0);m.hitsLanded+=Number(raw.hitsLanded||0);m.playtimeSeconds+=Number(value.playtimeSeconds||0);m.winPercentage=m.gamesPlayed?Math.round(m.wins*1000/m.gamesPlayed)/10:0;byId.set(raw.uuid,old);
+        }
+        settings.playerStats=[...byId.values()].sort((a,b)=>Number(b.wins||0)-Number(a.wins||0)||Number(b.gamesPlayed||0)-Number(a.gamesPlayed||0));settings.processedStatMatches[value.matchId]=Date.now();const ids=Object.keys(settings.processedStatMatches);if(ids.length>20000)for(const id of ids.sort((a,b)=>settings.processedStatMatches[a]-settings.processedStatMatches[b]).slice(0,ids.length-15000))delete settings.processedStatMatches[id];
+        void settings.save().then(()=>response.writeHead(204).end()).catch(()=>response.writeHead(500).end());return;
+      }
       if(request.url==="/player-stats/sync"){
         if(!Array.isArray(value.players)||value.players.length>500){response.writeHead(400).end();return;}
-        settings.playerStats=value.players.filter(player=>player&&typeof player.uuid==="string"&&typeof player.name==="string").map(player=>({...player,name:player.name.slice(0,16)}));
+        const merged=new Map((settings.playerStats||[]).filter(player=>player?.uuid).map(player=>[player.uuid,player]));for(const raw of value.players.filter(player=>player&&typeof player.uuid==="string"&&typeof player.name==="string")){const player={...raw,name:raw.name.slice(0,16)},old=merged.get(player.uuid);if(!old||Number(player.gamesPlayed||0)>=Number(old.gamesPlayed||0))merged.set(player.uuid,player);}settings.playerStats=[...merged.values()].sort((a,b)=>Number(b.wins||0)-Number(a.wins||0)||Number(b.gamesPlayed||0)-Number(a.gamesPlayed||0)).slice(0,500);
         void settings.save().then(()=>response.writeHead(204).end()).catch(()=>response.writeHead(500).end());return;
       }
       if(request.url==="/match/live"){
