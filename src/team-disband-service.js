@@ -1,10 +1,29 @@
 import { websiteTeams } from "./team-source.js";
 
-export async function disbandTeam(settings,client,guild,team,reason,actor="system"){
-  const current=websiteTeams(settings).find(entry=>entry.id===team.id);if(!current)return{deleted:false,notified:0};
-  const backup={teamSnapshot:structuredClone(settings.teamSnapshot),teamActions:structuredClone(settings.teamActions),schedules:structuredClone(settings.schedules),teamLeaveDeadlines:structuredClone(settings.teamLeaveDeadlines||{})};
+export async function disbandTeam(settings,client,guild,team,reason,actor="system") {
+  settings.deletedTeams||={};
+  const current=websiteTeams(settings).find(entry=>entry.id===team.id);
+  if(!current)return {deleted:false,notified:0,namesRestored:0};
+  const backup={teamSnapshot:structuredClone(settings.teamSnapshot),teamActions:structuredClone(settings.teamActions),schedules:structuredClone(settings.schedules),teamLeaveDeadlines:structuredClone(settings.teamLeaveDeadlines||{}),deletedTeams:structuredClone(settings.deletedTeams||{})};
   const discordIds=[...new Set((current.members||[]).map(uuid=>settings.links[uuid]).filter(Boolean))];
-  try{settings.teamSnapshot.teams=(settings.teamSnapshot.teams||[]).filter(entry=>entry.id!==current.id);settings.teamActions=(settings.teamActions||[]).filter(action=>action.id!==current.id);settings.teamActions.push({type:"delete",id:current.id,reason,disbandedBy:actor,disbandedAt:new Date().toISOString()});const removed=(settings.schedules||[]).filter(match=>match.teamOne===current.id||match.teamTwo===current.id);settings.schedules=(settings.schedules||[]).filter(match=>match.teamOne!==current.id&&match.teamTwo!==current.id);for(const[key,value]of Object.entries(settings.teamLeaveDeadlines||{}))if(value.teamId===current.id)delete settings.teamLeaveDeadlines[key];await settings.save();for(const match of removed)if(match.ticketChannelId){const channel=await guild.channels.fetch(match.ticketChannelId).catch(()=>null);await channel?.delete(`Team ${current.name} was disbanded`).catch(()=>{});}let notified=0;for(const discordId of discordIds){const user=await client.users.fetch(discordId).catch(()=>null);if(await user?.send(`Your MPCS team **${current.name}** has been disbanded.\n\n**Reason:** ${reason}`).then(()=>true).catch(()=>false))notified++;}return{deleted:true,notified};}catch(error){settings.teamSnapshot=backup.teamSnapshot;settings.teamActions=backup.teamActions;settings.schedules=backup.schedules;settings.teamLeaveDeadlines=backup.teamLeaveDeadlines;throw error;}
+  try {
+    settings.teamSnapshot.teams=(settings.teamSnapshot.teams||[]).filter(entry=>entry.id!==current.id);
+    settings.teamActions=(settings.teamActions||[]).filter(action=>action.id!==current.id);
+    settings.teamActions.push({type:"delete",id:current.id,reason,disbandedBy:actor,disbandedAt:new Date().toISOString()});
+    settings.deletedTeams[current.id]={reason,disbandedBy:actor,disbandedAt:new Date().toISOString()};
+    const removed=(settings.schedules||[]).filter(match=>match.teamOne===current.id||match.teamTwo===current.id);
+    settings.schedules=(settings.schedules||[]).filter(match=>match.teamOne!==current.id&&match.teamTwo!==current.id);
+    for(const[key,value]of Object.entries(settings.teamLeaveDeadlines||{}))if(value.teamId===current.id)delete settings.teamLeaveDeadlines[key];
+    await settings.save();
+    for(const match of removed)if(match.ticketChannelId){const channel=await guild.channels.fetch(match.ticketChannelId).catch(()=>null);await channel?.delete(`Team ${current.name} was disbanded`).catch(()=>{});}
+    let namesRestored=0;
+    for(const uuid of current.members||[]){const discordId=settings.links[uuid];if(!discordId||!(uuid in settings.originalNicknames))continue;const member=await guild.members.fetch(discordId).catch(()=>null);if(member?.manageable&&await member.setNickname(settings.originalNicknames[uuid]??null,`Team ${current.name} was disbanded`).then(()=>true).catch(()=>false))namesRestored++;}
+    let notified=0;
+    for(const discordId of discordIds){const user=await client.users.fetch(discordId).catch(()=>null);if(await user?.send(`Your MPCS team **${current.name}** has been disbanded.\n\n**Reason:** ${reason}`).then(()=>true).catch(()=>false))notified++;}
+    return {deleted:true,notified,namesRestored};
+  } catch(error) {
+    settings.teamSnapshot=backup.teamSnapshot;settings.teamActions=backup.teamActions;settings.schedules=backup.schedules;settings.teamLeaveDeadlines=backup.teamLeaveDeadlines;settings.deletedTeams=backup.deletedTeams;throw error;
+  }
 }
 
 export async function handleTeamMemberLeave(member,settings,client){const assignment=websiteTeams(settings).map(team=>({team,uuid:(team.members||[]).find(uuid=>settings.links[uuid]===member.id)})).find(value=>value.uuid);if(!assignment)return false;const{team}=assignment,leaderId=settings.links[team.leader],deadline=Date.now()+86_400_000,key=`${member.guild.id}:${team.id}:${member.id}`;settings.teamLeaveDeadlines[key]={guildId:member.guild.id,teamId:team.id,memberId:member.id,deadline,createdAt:new Date().toISOString()};await settings.save();if(leaderId){const leader=await client.users.fetch(leaderId).catch(()=>null);await leader?.send(`A player from **${team.name}** left the MPCS Discord: <@${member.id}>.\n\nYou have **24 hours** to find a replacement and open a support ticket. If the team still has fewer than 8 Discord members after <t:${Math.floor(deadline/1000)}:F>, the team will be disqualified and automatically disbanded.`).catch(()=>{});}return true;}
