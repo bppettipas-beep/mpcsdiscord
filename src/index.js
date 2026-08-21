@@ -120,6 +120,7 @@ const server = createServer(async(request, response) => {
   if (request.method === "GET" && request.url === "/api/stats") {
     response.writeHead(200,{"Content-Type":"application/json","Cache-Control":"no-store, no-cache, must-revalidate","Access-Control-Allow-Origin":"*"});response.end(JSON.stringify({players:settings.playerStats||[],updatedAt:new Date().toISOString()}));return;
   }
+  if(request.method==="GET"&&request.url.startsWith("/player-kits/")){const supplied=(request.headers.authorization||"").startsWith("Bearer ")?request.headers.authorization.slice(7):"";if(!secretsMatch(supplied,process.env.BRIDGE_SECRET)){response.writeHead(401).end();return;}const uuid=decodeURIComponent(request.url.slice(13));if(!/^[0-9a-f-]{36}$/i.test(uuid)){response.writeHead(400).end();return;}const kit=settings.playerKits?.[uuid];if(!kit){response.writeHead(404).end();return;}response.writeHead(200,{"Content-Type":"application/json","Cache-Control":"no-store"});response.end(JSON.stringify(kit));return;}
   if (request.method === "GET" && request.url === "/api/schedule") {
     const sourceTeams=websiteTeams(settings);
     const teamNames = new Map(sourceTeams.map(team => [team.id, team.name]));
@@ -142,7 +143,7 @@ const server = createServer(async(request, response) => {
     response.end(JSON.stringify({ ok: Boolean(discordChannel), build: "team-signup-v2" }));
     return;
   }
-  if (request.method !== "POST" || !["/minecraft-chat", "/link/start", "/link/remove", "/rank-sync", "/teams/sync", "/match/status", "/match/result", "/match/reset", "/match/live", "/player-stats/sync", "/player-stats/match"].includes(request.url)) {
+  if (request.method !== "POST" || !["/minecraft-chat", "/link/start", "/link/remove", "/rank-sync", "/teams/sync", "/match/status", "/match/result", "/match/reset", "/match/live", "/player-stats/sync", "/player-stats/match", "/player-kits/sync"].includes(request.url)) {
     response.writeHead(404).end();
     return;
   }
@@ -156,11 +157,12 @@ const server = createServer(async(request, response) => {
   request.setEncoding("utf8");
   request.on("data", (chunk) => {
     body += chunk;
-    if (body.length > 131072) request.destroy();
+    if (body.length > 1048576) request.destroy();
   });
   request.on("end", () => {
     try {
       const value = JSON.parse(body);
+      if(request.url==="/player-kits/sync"){if(typeof value.uuid!=="string"||!/^[0-9a-f-]{36}$/i.test(value.uuid)||typeof value.yaml!=="string"||value.yaml.length>900000||!Number.isFinite(value.updatedAt)){response.writeHead(400).end();return;}settings.playerKits||={};const old=settings.playerKits[value.uuid];if(!old||value.updatedAt>=Number(old.updatedAt||0))settings.playerKits[value.uuid]={yaml:value.yaml,updatedAt:value.updatedAt};void settings.save().then(()=>response.writeHead(204).end()).catch(()=>response.writeHead(500).end());return;}
       if(request.url==="/player-stats/match"){
         if(typeof value.matchId!=="string"||!value.matchId||!Array.isArray(value.players)||value.players.length!==2){response.writeHead(400).end();return;}
         settings.processedStatMatches ||= {};
