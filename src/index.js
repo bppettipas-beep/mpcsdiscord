@@ -107,7 +107,7 @@ async function flushOutgoing() {
 }
 
 const server = createServer(async(request, response) => {
-  if (request.method === "OPTIONS" && (request.url === "/api/schedule" || request.url === "/api/live" || request.url.startsWith("/api/live/"))) {
+  if (request.method === "OPTIONS" && (request.url === "/api/schedule" || request.url === "/api/stats" || request.url === "/api/live" || request.url.startsWith("/api/live/"))) {
     response.writeHead(204, { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, OPTIONS", "Access-Control-Allow-Headers": "Accept, Cache-Control, Content-Type" }).end();
     return;
   }
@@ -116,6 +116,9 @@ const server = createServer(async(request, response) => {
     for(const [id,live] of liveMatches)if(now-live.updatedAt>15000)liveMatches.delete(id);
     const games=[...liveMatches.values()].sort((a,b)=>b.updatedAt-a.updatedAt);
     response.writeHead(200,{"Content-Type":"application/json","Cache-Control":"no-store, no-cache, must-revalidate","Pragma":"no-cache","Access-Control-Allow-Origin":"*"});response.end(JSON.stringify({games,updatedAt:new Date().toISOString()}));return;
+  }
+  if (request.method === "GET" && request.url === "/api/stats") {
+    response.writeHead(200,{"Content-Type":"application/json","Cache-Control":"no-store, no-cache, must-revalidate","Access-Control-Allow-Origin":"*"});response.end(JSON.stringify({players:settings.playerStats||[],updatedAt:new Date().toISOString()}));return;
   }
   if (request.method === "GET" && request.url === "/api/schedule") {
     const sourceTeams=websiteTeams(settings);
@@ -139,7 +142,7 @@ const server = createServer(async(request, response) => {
     response.end(JSON.stringify({ ok: Boolean(discordChannel), build: "team-signup-v2" }));
     return;
   }
-  if (request.method !== "POST" || !["/minecraft-chat", "/link/start", "/link/remove", "/rank-sync", "/teams/sync", "/match/status", "/match/result", "/match/reset", "/match/live"].includes(request.url)) {
+  if (request.method !== "POST" || !["/minecraft-chat", "/link/start", "/link/remove", "/rank-sync", "/teams/sync", "/match/status", "/match/result", "/match/reset", "/match/live", "/player-stats/sync"].includes(request.url)) {
     response.writeHead(404).end();
     return;
   }
@@ -158,6 +161,11 @@ const server = createServer(async(request, response) => {
   request.on("end", () => {
     try {
       const value = JSON.parse(body);
+      if(request.url==="/player-stats/sync"){
+        if(!Array.isArray(value.players)||value.players.length>500){response.writeHead(400).end();return;}
+        settings.playerStats=value.players.filter(player=>player&&typeof player.uuid==="string"&&typeof player.name==="string").map(player=>({...player,name:player.name.slice(0,16)}));
+        void settings.save().then(()=>response.writeHead(204).end()).catch(()=>response.writeHead(500).end());return;
+      }
       if(request.url==="/match/live"){
         if(typeof value.matchId!=="string"||!["LIVE","ENDED"].includes(value.status)||!Array.isArray(value.players)){response.writeHead(400).end();return;}
         if(value.status==="ENDED"){liveMatches.delete(value.matchId);response.writeHead(204).end();return;}

@@ -30,6 +30,7 @@ export class SettingsStore {
     this.welcomeMessages = {};
     this.signupApprovals = {};
     this.approvedSignupMessages = {};
+    this.playerStats = [];
     this.saveQueue = Promise.resolve();
   }
 
@@ -61,6 +62,7 @@ export class SettingsStore {
       this.welcomeMessages = value.welcomeMessages && typeof value.welcomeMessages === "object" ? value.welcomeMessages : {};
       this.signupApprovals = value.signupApprovals && typeof value.signupApprovals === "object" ? value.signupApprovals : {};
       this.approvedSignupMessages = value.approvedSignupMessages && typeof value.approvedSignupMessages === "object" ? value.approvedSignupMessages : {};
+      this.playerStats = Array.isArray(value.playerStats) ? value.playerStats : [];
     } catch (error) {
       if (error.code === "ENOENT") return this.channelId;
       // A truncated config must never make the bot continue with empty defaults.
@@ -104,6 +106,7 @@ export class SettingsStore {
     this.welcomeMessages = value.welcomeMessages && typeof value.welcomeMessages === "object" ? value.welcomeMessages : {};
     this.signupApprovals = value.signupApprovals && typeof value.signupApprovals === "object" ? value.signupApprovals : {};
     this.approvedSignupMessages = value.approvedSignupMessages && typeof value.approvedSignupMessages === "object" ? value.approvedSignupMessages : {};
+    this.playerStats = Array.isArray(value.playerStats) ? value.playerStats : [];
   }
 
   async saveChannel(channelId) {
@@ -115,7 +118,8 @@ export class SettingsStore {
     this.saveQueue = this.saveQueue.catch(() => {}).then(async () => {
       await mkdir(dirname(this.filePath), { recursive: true });
       const temporary = `${this.filePath}.${process.pid}.${randomUUID()}.tmp`;
-      const value = { channelId: this.channelId, radioChannelId: this.radioChannelId, radioVolume: this.radioVolume, pending: this.pending, links: this.links, teamSnapshot: this.teamSnapshot, teamActions: this.teamActions, teamDrafts: this.teamDrafts, teamSignupDrafts: this.teamSignupDrafts, teamLeaderDrafts: this.teamLeaderDrafts, teamLeaderInvites: this.teamLeaderInvites, originalNicknames: this.originalNicknames, teamNicknameOptOut: this.teamNicknameOptOut, schedules: this.schedules, matchTicketConfig: this.matchTicketConfig, teamLogChannelId: this.teamLogChannelId, teamLogDigest: this.teamLogDigest, ticketConfig: this.ticketConfig, tickets: this.tickets, automod: this.automod, auditLogs: this.auditLogs, autoRoles: this.autoRoles, welcomeMessages: this.welcomeMessages, signupApprovals: this.signupApprovals, approvedSignupMessages: this.approvedSignupMessages };
+      const value = { channelId: this.channelId, radioChannelId: this.radioChannelId, radioVolume: this.radioVolume, pending: this.pending, links: this.links, teamSnapshot: this.teamSnapshot, teamActions: this.teamActions, teamDrafts: this.teamDrafts, teamSignupDrafts: this.teamSignupDrafts, teamLeaderDrafts: this.teamLeaderDrafts, teamLeaderInvites: this.teamLeaderInvites, originalNicknames: this.originalNicknames, teamNicknameOptOut: this.teamNicknameOptOut, schedules: this.schedules, matchTicketConfig: this.matchTicketConfig, teamLogChannelId: this.teamLogChannelId, teamLogDigest: this.teamLogDigest, ticketConfig: this.ticketConfig, tickets: this.tickets, automod: this.automod, auditLogs: this.auditLogs, autoRoles: this.autoRoles, welcomeMessages: this.welcomeMessages, signupApprovals: this.signupApprovals, approvedSignupMessages: this.approvedSignupMessages, playerStats: this.playerStats };
+      if (!value.playerStats.length) delete value.playerStats;
       await writeFile(temporary, JSON.stringify(value, null, 2), "utf8");
       try { await copyFile(this.filePath, `${this.filePath}.bak`); } catch (error) { if (error.code !== "ENOENT") throw error; }
       await rename(temporary, this.filePath);
