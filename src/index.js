@@ -15,11 +15,10 @@ import { welcomeCommand, handleWelcomeCommand, welcomeMember } from "./welcome-s
 import { teamSignupCommand, signupPanel, handleTeamSignup } from "./team-signup-ui.js";
 import { teamLeaderCommand, openTeamLeader, handleTeamLeader } from "./team-leader-ui.js";
 import { assignJoinRole, handleRoleAllCommand, reconcileAutoRole, roleAllCommand } from "./role-service.js";
-import { configureTeamLogs, publishTeamLogs, teamLogsCommand } from "./team-log-service.js";
+import { configureTeamLogs, publishTeamLogs, teamLogsCommand, warnUnderfilledTeams } from "./team-log-service.js";
 import { enforceSignupMessage, handleSignupApprovalCommand, handleSignupApprovalComponent, handleSignupReaction, handleSignupTeamsCommand, signupApprovalCommand, signupTeamsCommand } from "./signup-approval-service.js";
 import { MinecraftNameResolver } from "./minecraft-name-resolver.js";
 import { discordTeamAssignments, websiteTeams } from "./team-source.js";
-import { checkTeamLeaveDeadlines, handleTeamMemberLeave } from "./team-disband-service.js";
 
 const required = ["DISCORD_TOKEN", "BRIDGE_SECRET"];
 const missing = required.filter((name) => !process.env[name]);
@@ -232,7 +231,7 @@ const server = createServer(async(request, response) => {
       }
       if (request.url === "/teams/sync") {
         settings.teamSnapshot={teams:Array.isArray(value.teams)?value.teams:[],players:Array.isArray(value.players)?value.players:[]};const validTeams=new Set(settings.teamSnapshot.teams.map(team=>team.id));settings.teamLeaderInvites=settings.teamLeaderInvites.filter(invite=>validTeams.has(invite.teamId)&&(!invite.accepted||!settings.teamSnapshot.teams.find(team=>team.id===invite.teamId)?.members?.includes(invite.profile?.uuid)));const removedMatches=settings.schedules.filter(match=>!validTeams.has(match.teamOne)||!validTeams.has(match.teamTwo));settings.schedules=settings.schedules.filter(match=>validTeams.has(match.teamOne)&&validTeams.has(match.teamTwo));removedMatches.forEach(match=>liveMatches.delete(match.id));const actions=settings.teamActions.splice(0,100);
-        void reconcileTeamMembers().then(()=>publishTeamLogs(client,settings).catch(error=>console.error("Team roster log failed:",error))).then(()=>settings.save()).then(()=>{response.writeHead(200,{"Content-Type":"application/json"});response.end(JSON.stringify({actions,linkedUuids:Object.keys(settings.links)}));}).catch(error=>{console.error("Team Discord sync failed:",error);response.writeHead(500).end();});return;
+        void reconcileTeamMembers().then(()=>publishTeamLogs(client,settings).catch(error=>console.error("Team roster log failed:",error))).then(()=>warnUnderfilledTeams(client,settings).catch(error=>console.error("Underfilled-team warning failed:",error))).then(()=>settings.save()).then(()=>{response.writeHead(200,{"Content-Type":"application/json"});response.end(JSON.stringify({actions,linkedUuids:Object.keys(settings.links)}));}).catch(error=>{console.error("Team Discord sync failed:",error);response.writeHead(500).end();});return;
       }
       void handleRankSync(value).then((result) => {
         response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(result));
@@ -268,19 +267,21 @@ async function removeTeamDiscordState(uuid, discordId) {
   const guild = mainGuildId ? await client.guilds.fetch(mainGuildId) : null;
   if (!guild) return;
   let member; try { member = await guild.members.fetch(discordId); } catch { return; }
-  if (uuid in settings.originalNicknames) await member.setNickname(settings.originalNicknames[uuid], "MPCS team membership ended");
+  const original=settings.teamNicknameOwners?.[discordId]?.original??settings.originalNicknames[uuid]??null;
+  await member.setNickname(original, "MPCS team membership ended");
   delete settings.originalNicknames[uuid];
+  delete settings.teamNicknameOwners?.[discordId];
 }
 
 async function reconcileTeamMembers() {
-  const guild=mainGuildId?await client.guilds.fetch(mainGuildId):null;if(!guild)return{assigned:0,nicknameChanged:0,failed:0};const members=await guild.members.fetch(),assignments=discordTeamAssignments(settings),linkedByDiscord=new Map();for(const[uuid,discordId]of Object.entries(settings.links))if(!linkedByDiscord.has(discordId))linkedByDiscord.set(discordId,uuid);let nicknameChanged=0,failed=0,settingsChanged=false;
+  const guild=mainGuildId?await client.guilds.fetch(mainGuildId):null;if(!guild)return{assigned:0,nicknameChanged:0,failed:0};const members=await guild.members.fetch(),assignments=discordTeamAssignments(settings),linkedByDiscord=new Map();settings.teamNicknameOwners||={};for(const[uuid,discordId]of Object.entries(settings.links))if(!linkedByDiscord.has(discordId))linkedByDiscord.set(discordId,uuid);for(const[discordId,record]of Object.entries(settings.teamNicknameOwners))if(!linkedByDiscord.has(discordId))linkedByDiscord.set(discordId,record.uuid);let nicknameChanged=0,failed=0,settingsChanged=false;
   for(const [discordId,uuidFallback] of linkedByDiscord) {
     const assignment=assignments.get(discordId),uuid=assignment?.uuid||uuidFallback,team=assignment?.team,member=members.get(discordId);if(!member)continue;
     try {
       if (team) {
-        if (!(uuid in settings.originalNicknames)){settings.originalNicknames[uuid]=member.nickname??null;settingsChanged=true;}
+        if (!(uuid in settings.originalNicknames)){settings.originalNicknames[uuid]=member.nickname??null;settingsChanged=true;}if(!settings.teamNicknameOwners[discordId]){settings.teamNicknameOwners[discordId]={uuid,original:settings.originalNicknames[uuid]??null};settingsChanged=true;}
         if(!settings.teamNicknameOptOut[discordId]){const discordName=member.user.globalName||member.user.username,visibleName=discordName.slice(0,28),teamPart=String(team.name||team.id).toUpperCase().slice(0,Math.max(1,32-visibleName.length-3)),nickname=`${teamPart} | ${visibleName}`;if(member.nickname!==nickname){await member.setNickname(nickname,"MPCS team membership");nicknameChanged++;}}
-      } else {const storedUuid=Object.keys(settings.originalNicknames).find(id=>settings.links[id]===discordId);if(storedUuid){await removeTeamDiscordState(storedUuid,discordId);settingsChanged=true;}}
+      } else {const storedUuid=settings.teamNicknameOwners[discordId]?.uuid||Object.keys(settings.originalNicknames).find(id=>settings.links[id]===discordId);if(storedUuid){await removeTeamDiscordState(storedUuid,discordId);settingsChanged=true;}}
     } catch (error) {failed++;console.error(`Could not synchronize team nickname for ${uuid}:`,error);}
   }
   if(settingsChanged)await settings.save();return{assigned:assignments.size,nicknameChanged,failed};
@@ -316,7 +317,7 @@ client.once("clientReady", async () => {
     await reconcileConfiguredAutoRoles();
     const autoRoleRepairTimer=setInterval(()=>void reconcileConfiguredAutoRoles(),300_000);autoRoleRepairTimer.unref();
     const initialTeamSync=await reconcileTeamMembers();console.log(`Team nickname reconciliation: ${initialTeamSync.assigned} assigned, ${initialTeamSync.nicknameChanged} nicknames fixed, ${initialTeamSync.failed} failed.`);const teamRepairTimer=setInterval(()=>void reconcileTeamMembers().then(result=>{if(result.nicknameChanged||result.failed)console.log(`Team nickname reconciliation: ${result.assigned} assigned, ${result.nicknameChanged} nicknames fixed, ${result.failed} failed.`);}).catch(error=>console.error("Team nickname reconciliation failed:",error.message)),60_000);teamRepairTimer.unref();
-    await checkTeamLeaveDeadlines(settings,client);const teamDeadlineTimer=setInterval(()=>void checkTeamLeaveDeadlines(settings,client).catch(error=>console.error("Team roster deadline check failed:",error.message)),60_000);teamDeadlineTimer.unref();
+    settings.teamLeaveDeadlines={};await warnUnderfilledTeams(client,settings,true);const underfilledWarningTimer=setInterval(()=>void warnUnderfilledTeams(client,settings).catch(error=>console.error("Underfilled-team warning failed:",error.message)),3_600_000);underfilledWarningTimer.unref();
     for(const[guildId,config]of Object.entries(settings.ticketConfig))if(guildId!=="_transcriptLogChannelId"&&(config.restrictedRoleIds||[]).length){const guild=await client.guilds.fetch(guildId).catch(()=>null),members=guild?await guild.members.fetch().catch(()=>null):null;if(members)for(const member of members.values())if(config.restrictedRoleIds.some(roleId=>member.roles.cache.has(roleId)))await enforceTicketRestrictionsForMember(member,settings);}
     const initialChannelId = savedChannelId || process.env.DISCORD_CHANNEL_ID;
     if (initialChannelId) await selectDiscordChannel(initialChannelId);
@@ -423,7 +424,7 @@ client.on("messageReactionAdd",(reaction,user)=>void handleSignupReaction(reacti
 client.on("messageDelete",message=>void auditLogs.messageDelete(message).catch(error=>console.error("Message delete logging failed:",error)));
 client.on("messageUpdate",(before,after)=>void auditLogs.messageUpdate(before,after).catch(error=>console.error("Message edit logging failed:",error)));
 client.on("guildMemberAdd",member=>{void auditLogs.memberAdd(member).catch(error=>console.error("Member join logging failed:",error));void member.guild.members.fetch(member.id).then(full=>welcomeMember(full,settings)).catch(error=>console.error(`Could not welcome ${member.user.tag}:`,error.message));const roleId=settings.autoRoles[member.guild.id];if(roleId)void assignJoinRole(member,roleId).catch(error=>console.error(`Could not give or verify automatic role ${roleId} for ${member.user.tag}:`,error.message));});
-client.on("guildMemberRemove",member=>{void auditLogs.memberRemove(member).catch(error=>console.error("Member leave logging failed:",error));if(!mainGuildId||member.guild.id===mainGuildId)void handleTeamMemberLeave(member,settings,client).catch(error=>console.error("Team member leave workflow failed:",error));});
+client.on("guildMemberRemove",member=>{void auditLogs.memberRemove(member).catch(error=>console.error("Member leave logging failed:",error));if(!mainGuildId||member.guild.id===mainGuildId)void warnUnderfilledTeams(client,settings,true).catch(error=>console.error("Underfilled-team warning failed:",error));});
 client.on("guildMemberUpdate",(before,after)=>{void auditLogs.memberUpdate(before,after).catch(error=>console.error("Member update logging failed:",error));void enforceTicketRestrictionsForMember(after,settings).catch(error=>console.error("Ticket restriction sync failed:",error));});
 client.on("userUpdate",(before,after)=>void auditLogs.userUpdate(before,after).catch(error=>console.error("User update logging failed:",error)));
 client.on("guildBanAdd",ban=>void auditLogs.banAdd(ban).catch(error=>console.error("Ban logging failed:",error)));
