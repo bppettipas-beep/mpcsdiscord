@@ -19,6 +19,7 @@ import { configureTeamLogs, publishTeamLogs, teamLogsCommand } from "./team-log-
 import { enforceSignupMessage, handleSignupApprovalCommand, handleSignupApprovalComponent, handleSignupReaction, handleSignupTeamsCommand, signupApprovalCommand, signupTeamsCommand } from "./signup-approval-service.js";
 import { MinecraftNameResolver } from "./minecraft-name-resolver.js";
 import { discordTeamAssignments, websiteTeams } from "./team-source.js";
+import { checkTeamLeaveDeadlines, handleTeamMemberLeave } from "./team-disband-service.js";
 
 const required = ["DISCORD_TOKEN", "BRIDGE_SECRET"];
 const missing = required.filter((name) => !process.env[name]);
@@ -300,6 +301,7 @@ client.once("clientReady", async () => {
     await reconcileConfiguredAutoRoles();
     const autoRoleRepairTimer=setInterval(()=>void reconcileConfiguredAutoRoles(),300_000);autoRoleRepairTimer.unref();
     const initialTeamSync=await reconcileTeamMembers();console.log(`Team nickname reconciliation: ${initialTeamSync.assigned} assigned, ${initialTeamSync.nicknameChanged} nicknames fixed, ${initialTeamSync.failed} failed.`);const teamRepairTimer=setInterval(()=>void reconcileTeamMembers().then(result=>{if(result.nicknameChanged||result.failed)console.log(`Team nickname reconciliation: ${result.assigned} assigned, ${result.nicknameChanged} nicknames fixed, ${result.failed} failed.`);}).catch(error=>console.error("Team nickname reconciliation failed:",error.message)),60_000);teamRepairTimer.unref();
+    await checkTeamLeaveDeadlines(settings,client);const teamDeadlineTimer=setInterval(()=>void checkTeamLeaveDeadlines(settings,client).catch(error=>console.error("Team roster deadline check failed:",error.message)),60_000);teamDeadlineTimer.unref();
     for(const[guildId,config]of Object.entries(settings.ticketConfig))if(guildId!=="_transcriptLogChannelId"&&(config.restrictedRoleIds||[]).length){const guild=await client.guilds.fetch(guildId).catch(()=>null),members=guild?await guild.members.fetch().catch(()=>null):null;if(members)for(const member of members.values())if(config.restrictedRoleIds.some(roleId=>member.roles.cache.has(roleId)))await enforceTicketRestrictionsForMember(member,settings);}
     const initialChannelId = savedChannelId || process.env.DISCORD_CHANNEL_ID;
     if (initialChannelId) await selectDiscordChannel(initialChannelId);
@@ -317,6 +319,7 @@ client.once("clientReady", async () => {
 });
 
 client.on("interactionCreate", async (interaction) => {
+ try {
   if(interaction.isChatInputCommand()&&interaction.commandName==="signupteams"){if(staffGuildId&&interaction.guildId!==staffGuildId)return void interaction.reply({content:"This command is only available in the staff server.",flags:MessageFlags.Ephemeral});return void await handleSignupTeamsCommand(interaction,settings);}
   if(interaction.isChatInputCommand()&&interaction.commandName==="signupapproval"){if(mainGuildId&&interaction.guildId!==mainGuildId)return void interaction.reply({content:"This command is only available in the main server.",flags:MessageFlags.Ephemeral});return void await handleSignupApprovalCommand(interaction,settings);}
   if(interaction.isChatInputCommand()&&["add","close","closerequest"].includes(interaction.commandName)){if(mainGuildId&&interaction.guildId!==mainGuildId)return void interaction.reply({content:"Ticket actions are only available in the main server.",flags:MessageFlags.Ephemeral});return void await handleTicketCommand(interaction,settings);}
@@ -392,6 +395,12 @@ client.on("interactionCreate", async (interaction) => {
     const feature = interaction.commandName === "setradio" ? "radio channel" : "chat channel";
     await interaction.editReply(`Could not set the ${feature}: ${error.message}`);
   }
+ } catch(error) {
+  console.error(`Interaction ${interaction.commandName||interaction.customId||interaction.id} failed:`,error);
+  const content="Something went wrong while processing that command. Please try again; the error has been logged.";
+  if(interaction.deferred||interaction.replied)await interaction.editReply({content,components:[],embeds:[]}).catch(()=>{});
+  else await interaction.reply({content,flags:MessageFlags.Ephemeral}).catch(()=>{});
+ }
 });
 
 client.on("messageCreate",message=>void enforceSignupMessage(message,settings).then(handled=>handled||automod.message(message)).catch(error=>console.error("Message handling failed:",error)));
@@ -399,7 +408,7 @@ client.on("messageReactionAdd",(reaction,user)=>void handleSignupReaction(reacti
 client.on("messageDelete",message=>void auditLogs.messageDelete(message).catch(error=>console.error("Message delete logging failed:",error)));
 client.on("messageUpdate",(before,after)=>void auditLogs.messageUpdate(before,after).catch(error=>console.error("Message edit logging failed:",error)));
 client.on("guildMemberAdd",member=>{void auditLogs.memberAdd(member).catch(error=>console.error("Member join logging failed:",error));void member.guild.members.fetch(member.id).then(full=>welcomeMember(full,settings)).catch(error=>console.error(`Could not welcome ${member.user.tag}:`,error.message));const roleId=settings.autoRoles[member.guild.id];if(roleId)void assignJoinRole(member,roleId).catch(error=>console.error(`Could not give or verify automatic role ${roleId} for ${member.user.tag}:`,error.message));});
-client.on("guildMemberRemove",member=>void auditLogs.memberRemove(member).catch(error=>console.error("Member leave logging failed:",error)));
+client.on("guildMemberRemove",member=>{void auditLogs.memberRemove(member).catch(error=>console.error("Member leave logging failed:",error));if(!mainGuildId||member.guild.id===mainGuildId)void handleTeamMemberLeave(member,settings,client).catch(error=>console.error("Team member leave workflow failed:",error));});
 client.on("guildMemberUpdate",(before,after)=>{void auditLogs.memberUpdate(before,after).catch(error=>console.error("Member update logging failed:",error));void enforceTicketRestrictionsForMember(after,settings).catch(error=>console.error("Ticket restriction sync failed:",error));});
 client.on("userUpdate",(before,after)=>void auditLogs.userUpdate(before,after).catch(error=>console.error("User update logging failed:",error)));
 client.on("guildBanAdd",ban=>void auditLogs.banAdd(ban).catch(error=>console.error("Ban logging failed:",error)));
