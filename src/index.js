@@ -5,7 +5,7 @@ import { secretsMatch, validateChatPayload } from "./bridge-utils.js";
 import { SettingsStore } from "./settings-store.js";
 import { RadioService } from "./radio-service.js";
 import { publicTeamsCommand, openPublicTeams, handlePublicTeams } from "./teams-ui.js";
-import { teamAdminCommand, openTeamAdmin, handleTeamAdmin } from "./team-admin-ui.js";
+import { teamAdminAccessCommand, teamAdminCommand, openTeamAdmin, handleTeamAdmin, handleTeamAdminAccess } from "./team-admin-ui.js";
 import { embedCommand, sayCommand, statsCommand, openEmbed, handleEmbed, say, serverStats } from "./admin-ui.js";
 import { scheduleCommand, panel as schedulePanel, handleSchedule } from "./schedule-ui.js";
 import { ticketCommand, ticketActionCommands, handleTicketCommand, handleTicketComponent, repairTicketNumbers, repairOpenTicketStaffAccess, enforceTicketRestrictionsForMember } from "./ticket-ui.js";
@@ -310,9 +310,9 @@ client.once("clientReady", async () => {
     }
     if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON()]);
     const publicCommands=[linkCommand.toJSON(),embedCommand.toJSON(),sayCommand.toJSON(),statsCommand.toJSON(),scheduleCommand.toJSON(),autoRoleCommand.toJSON(),roleAllCommand.toJSON(),welcomeCommand.toJSON(),mentionProtectCommand.toJSON()];
-    if (mainGuildId) await (await client.guilds.fetch(mainGuildId)).commands.set([setRadioCommand.toJSON(),radioVolumeCommand.toJSON(),teamAdminCommand.toJSON(),publicTeamsCommand.toJSON(),teamSignupCommand.toJSON(),signupApprovalCommand.toJSON(),teamLeaderCommand.toJSON(),teamNicknameCommand.toJSON(),ticketCommand.toJSON(),...ticketActionCommands.map(command=>command.toJSON()),automodCommand.toJSON(),...publicCommands]);
+    if (mainGuildId) await (await client.guilds.fetch(mainGuildId)).commands.set([setRadioCommand.toJSON(),radioVolumeCommand.toJSON(),teamAdminCommand.toJSON(),teamAdminAccessCommand.toJSON(),publicTeamsCommand.toJSON(),teamSignupCommand.toJSON(),signupApprovalCommand.toJSON(),teamLeaderCommand.toJSON(),teamNicknameCommand.toJSON(),ticketCommand.toJSON(),...ticketActionCommands.map(command=>command.toJSON()),automodCommand.toJSON(),...publicCommands]);
     if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON(),teamLogsCommand.toJSON(),signupTeamsCommand.toJSON(),ticketCommand.toJSON(),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
-    if (!staffGuildId && !mainGuildId) await client.application.commands.set([setChatCommand.toJSON(),setRadioCommand.toJSON(),radioVolumeCommand.toJSON(),teamAdminCommand.toJSON(),publicTeamsCommand.toJSON(),teamSignupCommand.toJSON(),signupApprovalCommand.toJSON(),signupTeamsCommand.toJSON(),teamLeaderCommand.toJSON(),teamNicknameCommand.toJSON(),teamLogsCommand.toJSON(),ticketCommand.toJSON(),...ticketActionCommands.map(command=>command.toJSON()),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
+    if (!staffGuildId && !mainGuildId) await client.application.commands.set([setChatCommand.toJSON(),setRadioCommand.toJSON(),radioVolumeCommand.toJSON(),teamAdminCommand.toJSON(),teamAdminAccessCommand.toJSON(),publicTeamsCommand.toJSON(),teamSignupCommand.toJSON(),signupApprovalCommand.toJSON(),signupTeamsCommand.toJSON(),teamLeaderCommand.toJSON(),teamNicknameCommand.toJSON(),teamLogsCommand.toJSON(),ticketCommand.toJSON(),...ticketActionCommands.map(command=>command.toJSON()),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
     else await client.application.commands.set([]);
     radio.setVolume(settings.radioVolume);
     await repairTicketNumbers(client,settings);
@@ -380,6 +380,7 @@ client.on("interactionCreate", async (interaction) => {
   if(interaction.isChatInputCommand()&&interaction.commandName==="serverstats")return void await serverStats(interaction,settings,client);
   if((interaction.isButton()||interaction.isModalSubmit())&&interaction.customId.startsWith("embed:")){await handleEmbed(interaction);return;}
   if(interaction.isChatInputCommand()&&interaction.commandName==="editteam"){if(mainGuildId&&interaction.guildId!==mainGuildId)return void interaction.reply({content:"This command is only available in the main server.",flags:MessageFlags.Ephemeral});return void await openTeamAdmin(interaction,settings);}
+  if(interaction.isChatInputCommand()&&interaction.commandName==="editteamaccess"){if(mainGuildId&&interaction.guildId!==mainGuildId)return void interaction.reply({content:"This command is only available in the main server.",flags:MessageFlags.Ephemeral});return void await handleTeamAdminAccess(interaction,settings);}
   if(interaction.isChatInputCommand()&&interaction.commandName==="teams"){if(mainGuildId&&interaction.guildId!==mainGuildId)return void interaction.reply({content:"This command is only available in the main server.",flags:MessageFlags.Ephemeral});return void await openPublicTeams(interaction,settings);}
   if(interaction.isButton()&&interaction.customId.startsWith("publicteams:")){await handlePublicTeams(interaction,settings);return;}
   if((interaction.isButton()||interaction.isStringSelectMenu()||interaction.isUserSelectMenu()||interaction.isModalSubmit())&&interaction.customId.startsWith("teamadmin:")){await handleTeamAdmin(interaction,settings,reconcileTeamMembers);return;}
