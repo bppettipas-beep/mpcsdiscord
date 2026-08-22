@@ -19,6 +19,7 @@ import { configureTeamLogs, publishTeamLogs, teamLogsCommand, warnUnderfilledTea
 import { enforceSignupMessage, handleSignupApprovalCommand, handleSignupApprovalComponent, handleSignupReaction, handleSignupTeamsCommand, signupApprovalCommand, signupTeamsCommand } from "./signup-approval-service.js";
 import { MinecraftNameResolver } from "./minecraft-name-resolver.js";
 import { discordTeamAssignments, websiteTeams } from "./team-source.js";
+import { mentionProtectCommand, MentionProtectionService } from "./mention-protection-service.js";
 
 const required = ["DISCORD_TOKEN", "BRIDGE_SECRET"];
 const missing = required.filter((name) => !process.env[name]);
@@ -31,6 +32,7 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBit
 const settings = new SettingsStore(process.env.CONFIG_PATH || "/data/config.json");
 const radio = new RadioService(client, process.env.RADIO_STREAM_URL || "https://stream.revma.ihrhls.com/zc185");
 const automod = new AutoModService(client, settings);
+const mentionProtection = new MentionProtectionService(settings);
 const mainGuildId = process.env.MAIN_GUILD_ID || null;
 const staffGuildId = process.env.STAFF_GUILD_ID || null;
 const auditLogs = new AuditLogService(client,settings,mainGuildId,staffGuildId);
@@ -307,7 +309,7 @@ client.once("clientReady", async () => {
       return;
     }
     if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON()]);
-    const publicCommands=[linkCommand.toJSON(),embedCommand.toJSON(),sayCommand.toJSON(),statsCommand.toJSON(),scheduleCommand.toJSON(),autoRoleCommand.toJSON(),roleAllCommand.toJSON(),welcomeCommand.toJSON()];
+    const publicCommands=[linkCommand.toJSON(),embedCommand.toJSON(),sayCommand.toJSON(),statsCommand.toJSON(),scheduleCommand.toJSON(),autoRoleCommand.toJSON(),roleAllCommand.toJSON(),welcomeCommand.toJSON(),mentionProtectCommand.toJSON()];
     if (mainGuildId) await (await client.guilds.fetch(mainGuildId)).commands.set([setRadioCommand.toJSON(),radioVolumeCommand.toJSON(),teamAdminCommand.toJSON(),publicTeamsCommand.toJSON(),teamSignupCommand.toJSON(),signupApprovalCommand.toJSON(),teamLeaderCommand.toJSON(),teamNicknameCommand.toJSON(),ticketCommand.toJSON(),...ticketActionCommands.map(command=>command.toJSON()),automodCommand.toJSON(),...publicCommands]);
     if (staffGuildId) await (await client.guilds.fetch(staffGuildId)).commands.set([setChatCommand.toJSON(),teamLogsCommand.toJSON(),signupTeamsCommand.toJSON(),ticketCommand.toJSON(),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
     if (!staffGuildId && !mainGuildId) await client.application.commands.set([setChatCommand.toJSON(),setRadioCommand.toJSON(),radioVolumeCommand.toJSON(),teamAdminCommand.toJSON(),publicTeamsCommand.toJSON(),teamSignupCommand.toJSON(),signupApprovalCommand.toJSON(),signupTeamsCommand.toJSON(),teamLeaderCommand.toJSON(),teamNicknameCommand.toJSON(),teamLogsCommand.toJSON(),ticketCommand.toJSON(),...ticketActionCommands.map(command=>command.toJSON()),automodCommand.toJSON(),logsCommand.toJSON(),...publicCommands]);
@@ -356,6 +358,7 @@ client.on("interactionCreate", async (interaction) => {
   if(interaction.isChatInputCommand()&&interaction.commandName==="logs")return void await auditLogs.command(interaction);
   if(interaction.isChatInputCommand()&&interaction.commandName==="teamlogs"){if(staffGuildId&&interaction.guildId!==staffGuildId)return void interaction.reply({content:"Team logs can only be configured in the staff server.",flags:MessageFlags.Ephemeral});return void await configureTeamLogs(interaction,settings,client);}
   if(interaction.isChatInputCommand()&&interaction.commandName==="automod")return void await automod.command(interaction);
+  if(interaction.isChatInputCommand()&&interaction.commandName==="mentionprotect")return void await mentionProtection.command(interaction);
   if(interaction.isChatInputCommand()&&interaction.commandName==="ticket"){const logs=interaction.options.getSubcommand()==="logs";if(logs&&staffGuildId&&interaction.guildId!==staffGuildId)return void interaction.reply({content:"Ticket transcript logs must be configured in the staff server.",flags:MessageFlags.Ephemeral});if(!logs&&mainGuildId&&interaction.guildId!==mainGuildId)return void interaction.reply({content:"Tickets are only available in the main server.",flags:MessageFlags.Ephemeral});return void await handleTicketCommand(interaction,settings);}
   if(interaction.isChatInputCommand()&&interaction.commandName==="teamnickname"){const linked=Object.entries(settings.links).find(([,discordId])=>discordId===interaction.user.id);if(!linked)return void interaction.reply({content:"Your Discord account must be linked to Minecraft first.",flags:MessageFlags.Ephemeral});const[uuid]=linked,member=await interaction.guild.members.fetch(interaction.user.id);if(settings.teamNicknameOptOut[interaction.user.id]){delete settings.teamNicknameOptOut[interaction.user.id];await reconcileTeamMembers();await settings.save();return void interaction.reply({content:"Your automatic team nickname is now enabled.",flags:MessageFlags.Ephemeral});}settings.teamNicknameOptOut[interaction.user.id]=true;const original=settings.originalNicknames[uuid]??null;await member.setNickname(original,"Administrator disabled automatic MPCS team nickname").catch(()=>{});await settings.save();return void interaction.reply({content:"Your automatic team nickname is now disabled. Your team membership was kept.",flags:MessageFlags.Ephemeral});}
   if((interaction.isButton()||interaction.isStringSelectMenu()||interaction.isChannelSelectMenu()||interaction.isRoleSelectMenu()||interaction.isModalSubmit())&&interaction.customId.startsWith("ticket:")){await handleTicketComponent(interaction,settings);return;}
@@ -421,7 +424,11 @@ client.on("interactionCreate", async (interaction) => {
  }
 });
 
-client.on("messageCreate",message=>void enforceSignupMessage(message,settings).then(handled=>handled||automod.message(message)).catch(error=>console.error("Message handling failed:",error)));
+client.on("messageCreate",message=>void (async()=>{
+  if(await mentionProtection.message(message))return;
+  if(await enforceSignupMessage(message,settings))return;
+  await automod.message(message);
+})().catch(error=>console.error("Message handling failed:",error)));
 client.on("messageReactionAdd",(reaction,user)=>void handleSignupReaction(reaction,user,settings).catch(error=>console.error("Team signup approval failed:",error)));
 client.on("messageDelete",message=>void auditLogs.messageDelete(message).catch(error=>console.error("Message delete logging failed:",error)));
 client.on("messageUpdate",(before,after)=>void auditLogs.messageUpdate(before,after).catch(error=>console.error("Message edit logging failed:",error)));

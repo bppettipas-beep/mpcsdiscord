@@ -37,6 +37,7 @@ export class SettingsStore {
     this.teamNicknameOwners = {};
     this.playerKits = {};
     this.deletedTeams = {};
+    this.protectedMentions = {};
     this.saveQueue = Promise.resolve();
   }
 
@@ -75,6 +76,7 @@ export class SettingsStore {
       this.teamNicknameOwners = value.teamNicknameOwners && typeof value.teamNicknameOwners === "object" ? value.teamNicknameOwners : {};
       this.playerKits = value.playerKits && typeof value.playerKits === "object" ? value.playerKits : {};
       this.deletedTeams = value.deletedTeams && typeof value.deletedTeams === "object" ? value.deletedTeams : {};
+      this.protectedMentions = value.protectedMentions && typeof value.protectedMentions === "object" ? value.protectedMentions : {};
     } catch (error) {
       if (error.code === "ENOENT") return this.channelId;
       // A truncated config must never make the bot continue with empty defaults.
@@ -125,6 +127,7 @@ export class SettingsStore {
     this.teamNicknameOwners = value.teamNicknameOwners && typeof value.teamNicknameOwners === "object" ? value.teamNicknameOwners : {};
     this.playerKits = value.playerKits && typeof value.playerKits === "object" ? value.playerKits : {};
     this.deletedTeams = value.deletedTeams && typeof value.deletedTeams === "object" ? value.deletedTeams : {};
+    this.protectedMentions = value.protectedMentions && typeof value.protectedMentions === "object" ? value.protectedMentions : {};
   }
 
   async saveChannel(channelId) {
@@ -136,12 +139,13 @@ export class SettingsStore {
     this.saveQueue = this.saveQueue.catch(() => {}).then(async () => {
       await mkdir(dirname(this.filePath), { recursive: true });
       const temporary = `${this.filePath}.${process.pid}.${randomUUID()}.tmp`;
-      const value = { channelId: this.channelId, radioChannelId: this.radioChannelId, radioVolume: this.radioVolume, pending: this.pending, links: this.links, teamSnapshot: this.teamSnapshot, teamActions: this.teamActions, teamDrafts: this.teamDrafts, teamSignupDrafts: this.teamSignupDrafts, teamLeaderDrafts: this.teamLeaderDrafts, teamLeaderInvites: this.teamLeaderInvites, originalNicknames: this.originalNicknames, teamNicknameOwners:this.teamNicknameOwners, teamNicknameOptOut: this.teamNicknameOptOut, schedules: this.schedules, matchTicketConfig: this.matchTicketConfig, teamLogChannelId: this.teamLogChannelId, teamLogDigest: this.teamLogDigest, ticketConfig: this.ticketConfig, tickets: this.tickets, automod: this.automod, auditLogs: this.auditLogs, autoRoles: this.autoRoles, welcomeMessages: this.welcomeMessages, signupApprovals: this.signupApprovals, approvedSignupMessages: this.approvedSignupMessages, playerStats: this.playerStats, processedStatMatches:this.processedStatMatches, playerKits:this.playerKits, underfilledTeamWarnings:this.underfilledTeamWarnings, deletedTeams:this.deletedTeams };
+      const value = { channelId: this.channelId, radioChannelId: this.radioChannelId, radioVolume: this.radioVolume, pending: this.pending, links: this.links, teamSnapshot: this.teamSnapshot, teamActions: this.teamActions, teamDrafts: this.teamDrafts, teamSignupDrafts: this.teamSignupDrafts, teamLeaderDrafts: this.teamLeaderDrafts, teamLeaderInvites: this.teamLeaderInvites, originalNicknames: this.originalNicknames, teamNicknameOwners:this.teamNicknameOwners, teamNicknameOptOut: this.teamNicknameOptOut, schedules: this.schedules, matchTicketConfig: this.matchTicketConfig, teamLogChannelId: this.teamLogChannelId, teamLogDigest: this.teamLogDigest, ticketConfig: this.ticketConfig, tickets: this.tickets, automod: this.automod, auditLogs: this.auditLogs, autoRoles: this.autoRoles, welcomeMessages: this.welcomeMessages, signupApprovals: this.signupApprovals, approvedSignupMessages: this.approvedSignupMessages, playerStats: this.playerStats, processedStatMatches:this.processedStatMatches, playerKits:this.playerKits, underfilledTeamWarnings:this.underfilledTeamWarnings, deletedTeams:this.deletedTeams, protectedMentions:this.protectedMentions };
       if (!value.playerStats.length) delete value.playerStats;
       if (!Object.keys(value.underfilledTeamWarnings).length) delete value.underfilledTeamWarnings;
       if (!Object.keys(value.teamNicknameOwners).length) delete value.teamNicknameOwners;
       if (!Object.keys(value.playerKits).length) delete value.playerKits;
       if (!Object.keys(value.deletedTeams).length) delete value.deletedTeams;
+      if (!Object.keys(value.protectedMentions).length) delete value.protectedMentions;
       await writeFile(temporary, JSON.stringify(value, null, 2), "utf8");
       try { await copyFile(this.filePath, `${this.filePath}.bak`); } catch (error) { if (error.code !== "ENOENT") throw error; }
       await rename(temporary, this.filePath);
